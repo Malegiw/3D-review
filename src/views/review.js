@@ -12,7 +12,7 @@ import { loadModelFiles, guessUnits, guessZUp, ACCEPT, NATIVE_FORMATS, ext } fro
 import { runClash } from '../engine/clash.js';
 import { runMTO } from '../engine/mto.js';
 import { playBuildUp, playOrbit, playTour } from '../engine/motion.js';
-import { NATIVE_EXT, getConverter, startConversion, projectJobs, retryJob, removeJob } from '../core/jobs.js';
+import { NATIVE_EXT, getConverter, startConversion, projectJobs, retryJob, removeJob, repoClient, importOutput } from '../core/jobs.js';
 import { openConverterSetup } from './converter-setup.js';
 
 const STATUS = ['New', 'Active', 'Reviewed', 'Approved', 'Resolved'];
@@ -177,20 +177,31 @@ export async function renderReview(main, project) {
     });
   }
   async function fromRepo() {
-    let list;
-    try { const r = await fetch('./models/index.json', { cache: 'no-store' }); if (!r.ok) throw new Error(); list = (await r.json()).models || []; } catch { return toast('No converted models in the repository yet (models/index.json not found).', 'warn'); }
-    if (!list.length) return toast('Repository model list is empty.', 'warn');
-    const v = await formDialog({ title: 'Model from repository', eyebrow: 'GITHUB · CONVERTED', submitLabel: 'Load', fields: [{ id: 'f', label: 'Model', type: 'select', options: list.map((m) => ({ v: m.file, l: `${m.name} · ${m.source || ''} · ${fmt.bytes(m.size)}` })), span: true }] });
-    if (!v) return;
-    const meta = list.find((m) => m.file === v.f);
-    viewer.setHud('DOWNLOADING', meta.name);
+    let list = [], gh = null;
     try {
-      const blob = await (await fetch(`./models/${meta.file}`)).blob();
-      const rec = { id: uid('m'), projectId: project.id, name: meta.name, files: [{ name: meta.file.split('/').pop(), blob }], units: meta.units || 'm', zUp: !!meta.zUp, transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now() };
-      await db.put('models', rec);
+      gh = await repoClient();
+      if (gh) list = await gh.listOutputs();
+    } catch (e) { toast(`GitHub: ${e.message}`, 'warn'); }
+    if (!gh) {
+      try { const r = await fetch('./models/index.json', { cache: 'no-store' }); if (r.ok) list = ((await r.json()).models || []).map((m) => ({ ...m, path: null })); } catch { /* none */ }
+    }
+    if (!list.length) return toast(gh ? 'No converted models in the repository yet.' : 'No converted models found. Set up the converter (⚙) to list models from your repository.', 'warn');
+    const label = (m) => `${m.name || m.source || m.file} · ${m.objects ? `${Number(m.objects).toLocaleString()} obj · ` : ''}${fmt.bytes(m.size)}${m.converted ? ` · ${String(m.converted).slice(0, 16).replace('T', ' ')}` : ''}`;
+    const v = await formDialog({ title: 'Model from repository', eyebrow: 'GITHUB · CONVERTED', submitLabel: 'Load', fields: [{ id: 'f', label: 'Model', type: 'select', options: list.map((m, i) => ({ v: String(i), l: label(m) })), span: true }] });
+    if (!v) return;
+    const meta = list[Number(v.f)];
+    viewer.setHud('DOWNLOADING', meta.name || meta.file);
+    try {
+      if (meta.path) {
+        await importOutput(project.id, meta);
+      } else {
+        const blob = await (await fetch(`./models/${meta.file}`)).blob();
+        await db.put('models', { id: uid('m'), projectId: project.id, name: meta.name, files: [{ name: meta.file.split('/').pop(), blob }], units: meta.units || 'm', zUp: !!meta.zUp, transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now() });
+      }
       await syncLayers();
       viewer.fit();
       renderPanel(); corner();
+      toast('Model added to the 3D review.', 'ok');
     } catch (e) { toast(e.message, 'err'); } finally { viewer.setHud(''); }
   }
   async function layerSettings(L) {

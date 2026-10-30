@@ -144,5 +144,16 @@ export class GitHubRepo {
     }
     return [];
   }
+  /** Every converted model in the repository (newest first), with its path. */
+  async listOutputs() {
+    const all = [];
+    for (const dir of GLB_DIRS) {
+      try {
+        const idx = await (await this.rawFile(`${dir}/index.json`)).json();
+        for (const m of idx.models || []) all.push({ ...m, path: `${dir}/${m.file}` });
+      } catch (e) { if (e.status !== 404) throw e; }
+    }
+    return all.sort((a, b) => String(b.converted || '').localeCompare(String(a.converted || '')));
+  }
   async download(path) { return (await this.rawFile(path)).blob(); }
 }

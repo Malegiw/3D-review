@@ -20,6 +20,22 @@ export async function repoClient(cfg) {
 async function save(job) { job.updated = Date.now(); await db.put('jobs', job); emit('nexus:jobs', job); return job; }
 export async function projectJobs(projectId) { return (await db.byProject('jobs', projectId)).sort((a, b) => b.created - a.created); }
 
+/** Download one converted model (entry from GitHubRepo.listOutputs) into a project. */
+export async function importOutput(projectId, o) {
+  const gh = await repoClient();
+  if (!gh) throw new Error('Set up the converter first.');
+  let blob = await gh.download(o.path);
+  const enc = o.encrypted || /\.nxe$/i.test(o.file);
+  if (enc) blob = await decryptBlob(blob, (await getConverter())?.key);
+  const name = o.name || String(o.source || o.file).replace(/^\d{10,}-/, '').replace(/\.[^.]+(\.nxe)?$/i, '');
+  const rec = {
+    id: uid('m'), projectId, name, source: o.source, files: [{ name: o.file.replace(/\.nxe$/i, ''), blob }], units: o.units || 'm', zUp: !!o.zUp,
+    transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now(),
+  };
+  await db.put('models', rec);
+  return rec;
+}
+
 export async function startConversion(projectId, file) {
   const gh = await repoClient();
   if (!gh) throw new Error('Set up the converter first.');
