@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CATS } from '../core/domain.js';
+import { view3d, catColor } from '../core/theme.js';
 
 /** plan → world (metres, centred on page) */
 export function makeMapper(plan) {
@@ -174,7 +175,7 @@ const matCache = new Map();
 export function catMaterial(cat) {
   if (matCache.has(cat)) return matCache.get(cat);
   const def = CATS[cat] || CATS.equipment;
-  const c = new THREE.Color(def.color);
+  const c = new THREE.Color(catColor(cat, def.color));
   const m = new THREE.MeshStandardMaterial({
     color: c, emissive: c.clone().multiplyScalar(0.22), metalness: 0.25, roughness: 0.55,
     transparent: !!def.ghost || cat === 'pit', opacity: def.ghost ? 0.35 : cat === 'pit' ? 0.6 : 1, side: def.ghost ? THREE.DoubleSide : THREE.FrontSide,
@@ -183,9 +184,16 @@ export function catMaterial(cat) {
   return m;
 }
 const edgeMat = new THREE.LineBasicMaterial({ color: 0xbff9ff, transparent: true, opacity: 0.55 });
+const paintEdges = () => { const p = view3d(); edgeMat.color.set(p.edge); edgeMat.opacity = p.edgeOpacity; };
+// live theme switch: recolour the shared plot plan materials in place
+if (typeof window !== 'undefined') window.addEventListener('r3d:theme', () => {
+  paintEdges();
+  for (const [cat, m] of matCache) { const c = new THREE.Color(catColor(cat, (CATS[cat] || CATS.equipment).color)); m.color.copy(c); m.emissive.copy(c).multiplyScalar(0.22); }
+});
 
 /** Build a Group for the whole plot plan (+ optional neon ground from the PDF raster). */
 export function buildPlotModel(plan, { groundCanvas } = {}) {
+  paintEdges();
   const map = makeMapper(plan);
   const group = new THREE.Group();
   group.name = plan.name || 'Plot plan';
@@ -200,6 +208,7 @@ export function buildPlotModel(plan, { groundCanvas } = {}) {
     mesh.userData = { tag: obj.tag || '', cat: obj.cat, objId: obj.id, material: CATS[obj.cat]?.mat };
     if ((geo.attributes.position.count || 0) < 60000) {
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), edgeMat);
+      edges.userData.edge = true;
       edges.userData.helper = true;
       edges.raycast = () => {};
       mesh.add(edges);
@@ -222,7 +231,7 @@ export function buildPlotModel(plan, { groundCanvas } = {}) {
   return group;
 }
 
-/** Neon blueprint ground: dark lines of the PDF become glowing cyan on transparent. */
+/** Blueprint ground: dark lines of the PDF become theme-coloured lines on transparent (glowing cyan in cyber). */
 export function neonGround(srcCanvas, maxDim = 2048) {
   const k = Math.min(1, maxDim / Math.max(srcCanvas.width, srcCanvas.height));
   const c = document.createElement('canvas');
@@ -231,9 +240,11 @@ export function neonGround(srcCanvas, maxDim = 2048) {
   ctx.drawImage(srcCanvas, 0, 0, c.width, c.height);
   const img = ctx.getImageData(0, 0, c.width, c.height);
   const d = img.data;
+  const g = view3d().ground;
   for (let i = 0; i < d.length; i += 4) {
     const lum = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) / 255;
     const ink = Math.min(1, Math.max(0, (1 - lum) * 1.6));
+    if (g) { d[i] = g[0]; d[i + 1] = g[1]; d[i + 2] = g[2]; d[i + 3] = g[3] + g[4] * ink; continue; }
     d[i] = 20 + 80 * ink; d[i + 1] = 200 + 55 * ink; d[i + 2] = 255;
     d[i + 3] = 18 + 230 * ink;
   }

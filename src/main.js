@@ -5,9 +5,12 @@ import '@fontsource/rajdhani/500.css';
 import '@fontsource/rajdhani/600.css';
 import '@fontsource/rajdhani/700.css';
 import '@fontsource/share-tech-mono/400.css';
+import './styles/fonts.css';
 import './styles/theme.css';
 
 import { h, icon, logoMark, toast } from './core/ui.js';
+import { THEMES, getTheme, setTheme, applyTheme } from './core/theme.js';
+import { LANGS, currentLang, setLang, startI18n } from './core/i18n.js';
 import { db, requestPersistence } from './core/db.js';
 import { seedSample } from './core/store.js';
 import { ensurePoller } from './core/jobs.js';
@@ -16,7 +19,7 @@ import { renderOverview, renderDocs } from './views/project.js';
 import { renderPlot } from './views/plotplan.js';
 import { renderReview } from './views/review.js';
 
-import { VERSION, state, projectRoute } from './core/app.js';
+import { VERSION, YEAR, state, projectRoute } from './core/app.js';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: 'grid', render: renderOverview },
@@ -41,16 +44,47 @@ const main = h('main', { class: 'main', id: 'main' });
 shell.append(top, rail, main);
 app.append(shell);
 
+const SWATCH = { cloud: 'linear-gradient(135deg, #eef1f0 50%, #0a6c6a 50% 80%, #f2621a 80%)', night: 'linear-gradient(135deg, #0c1716 50%, #35c2b1 50% 80%, #ff7a33 80%)', cyber: 'linear-gradient(135deg, #07060c 50%, #00f0ff 50% 80%, #ff2fd0 80%)' };
+
+function openDisplayMenu(anchor) {
+  document.querySelector('.menu')?.remove();
+  const close = () => { menu.remove(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', onKey); anchor.setAttribute('aria-expanded', 'false'); };
+  const outside = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const onKey = (e) => { if (e.key === 'Escape') { close(); anchor.focus(); } };
+  const cur = getTheme();
+  const menu = h('div', { class: 'menu', role: 'dialog', 'aria-label': 'Theme and language' },
+    h('h3', {}, 'Theme'),
+    THEMES.map((th) => h('button', { type: 'button', class: `opt ${th.id === cur ? 'on' : ''}`, 'aria-pressed': String(th.id === cur), onclick: () => { setTheme(th.id); close(); } },
+      h('span', { class: 'sw', style: { background: SWATCH[th.id] } }), h('span', {}, h('b', {}, th.label), h('small', {}, th.hint)), th.id === cur ? icon('check') : h('span'))),
+    h('h3', {}, 'Language'),
+    LANGS.map((l) => h('button', { type: 'button', class: `opt ${l.id === currentLang() ? 'on' : ''}`, 'aria-pressed': String(l.id === currentLang()), onclick: () => { close(); changeLang(l.id); } },
+      h('span', { class: 'sw', style: { display: 'grid', placeItems: 'center', font: '700 11px/1 var(--f-ui)', background: 'var(--bg-3)' } }, l.label), h('span', {}, h('b', { class: 'no-i18n' }, l.name)), l.id === currentLang() ? icon('check') : h('span'))),
+    h('div', { class: 'copy' }, `Review 3D v${VERSION} · © ${YEAR} Yan Malegi Diardi`));
+  document.body.append(menu);
+  anchor.setAttribute('aria-expanded', 'true');
+  setTimeout(() => { document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', onKey); menu.querySelector('.opt.on')?.focus(); }, 0);
+}
+
+function changeLang(l) {
+  setLang(l);
+  route_(); // re-render so dates and generated text follow the language
+}
+
 function renderTop(route) {
   top.innerHTML = '';
-  const logo = h('a', { class: 'logo', href: '#home', 'aria-label': 'NEXUS 3D home' }, logoMark(),
-    h('div', {}, h('div', { class: 'logo-text glitch', 'data-t': 'NEXUS//3D' }, h('b', {}, 'NEXUS'), h('i', {}, '//'), '3D'), h('div', { class: 'logo-sub' }, 'REVIEW · BY YMD')));
+  const logo = h('a', { class: 'logo', href: '#home', 'aria-label': 'Review 3D home' }, logoMark(),
+    h('div', {}, h('div', { class: 'logo-text glitch no-i18n', 'data-t': 'REVIEW//3D' }, h('b', {}, 'Review'), h('i', {}, '//'), h('span', { class: 'logo-3d' }, '3D')),
+      h('div', { class: 'logo-sub' }, 'by Yan Malegi Diardi')));
   const crumb = h('div', { class: 'crumb' });
   if (route.name === 'project' && state.project) {
-    crumb.append(h('span', { class: 'crumb-hide' }, '/'), h('span', { class: 'crumb-hide' }, state.project.code || 'PRJ'), h('span', { class: 'crumb-hide' }, '/'), h('b', {}, state.project.name));
-  } else crumb.append(h('span', { class: 'crumb-hide' }, '/'), h('b', {}, 'PROJECT GRID'));
+    crumb.append(h('span', { class: 'crumb-hide sep' }, '/'), h('span', { class: 'crumb-hide no-i18n' }, state.project.code || 'PRJ'), h('span', { class: 'crumb-hide sep' }, '/'), h('b', { class: 'no-i18n' }, state.project.name));
+  } else crumb.append(h('span', { class: 'crumb-hide sep' }, '/'), h('b', {}, 'Projects'));
+  const lang = h('div', { class: 'lang', role: 'group', 'aria-label': 'Interface language' },
+    LANGS.map((l) => h('button', { type: 'button', class: `no-i18n ${l.id === currentLang() ? 'on' : ''}`, 'aria-pressed': String(l.id === currentLang()), title: l.name, onclick: () => changeLang(l.id) }, l.label)));
+  const themeBtn = h('button', { type: 'button', class: 'theme-btn', 'aria-label': 'Change theme', title: 'Theme', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', onclick: (e) => openDisplayMenu(e.currentTarget) }, icon('palette'));
   top.append(logo, crumb, h('div', { class: 'top-actions' },
-    h('span', { class: 'crumb crumb-hide', title: db.persistent ? 'Data is stored on this device' : 'Storage unavailable — data lives only in this tab' }, h('i', { class: 'sys-dot', style: db.persistent ? null : { background: 'var(--yellow)', boxShadow: '0 0 10px var(--yellow)' } }), db.persistent ? 'LOCAL · ONLINE' : 'MEMORY ONLY')));
+    h('span', { class: 'crumb crumb-hide', title: db.persistent ? 'Data is stored on this device' : 'Storage unavailable — data lives only in this tab' }, h('i', { class: 'sys-dot', style: db.persistent ? null : { background: 'var(--yellow)' } }), db.persistent ? 'Saved on this device' : 'Memory only'),
+    lang, themeBtn));
 }
 
 function renderRail(route) {
@@ -87,9 +121,9 @@ async function route_() {
 }
 
 function boot() {
-  const lines = ['NEXUS//3D REVIEW v' + VERSION, '> mounting local datastore ........ OK', '> calibrating neon grid ........... OK', '> loading geometry kernel ......... OK', '> SYSTEM ONLINE'];
+  const lines = ['REVIEW//3D v' + VERSION + ' · © ' + YEAR + ' YAN MALEGI DIARDI', '> mounting local datastore ........ OK', '> calibrating neon grid ........... OK', '> loading geometry kernel ......... OK', '> SYSTEM ONLINE'];
   const pre = h('pre', {});
-  const el = h('div', { class: 'boot' }, pre);
+  const el = h('div', { class: 'boot no-i18n' }, pre);
   document.body.append(el);
   let i = 0;
   const step = () => {
@@ -100,11 +134,14 @@ function boot() {
 }
 
 window.nexus = state; // handy for debugging from the browser console
+applyTheme();
+startI18n();
+window.addEventListener('r3d:theme', () => { const r = state.route; if (r) renderTop(r); });
 
 (async function start() {
   let seen = false;
   try { seen = sessionStorage.getItem('nx-boot') === '1'; sessionStorage.setItem('nx-boot', '1'); } catch { /* sandboxed */ }
-  if (!seen && !matchMedia('(prefers-reduced-motion: reduce)').matches) boot();
+  if (!seen && getTheme() === 'cyber' && !matchMedia('(prefers-reduced-motion: reduce)').matches) boot();
   requestPersistence();
   try {
     const projects = await db.all('projects');
@@ -113,7 +150,7 @@ window.nexus = state; // handy for debugging from the browser console
   window.addEventListener('hashchange', route_);
   await route_();
   ensurePoller(); // resume conversions that were running on GitHub while the app was closed
-  setTimeout(() => document.querySelector('.logo-text')?.classList.add('run'), 900);
+  if (getTheme() === 'cyber') setTimeout(() => document.querySelector('.logo-text')?.classList.add('run'), 900);
   if ('serviceWorker' in navigator && location.protocol === 'https:' && window.self === window.top) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }

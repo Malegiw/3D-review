@@ -1,10 +1,11 @@
-// NEXUS 3D viewer engine — federated model review (Navisworks-style) on Three.js.
+// Review 3D viewer engine — federated model review (Navisworks-style) on Three.js.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { h } from '../core/ui.js';
 import { meshVolumeArea } from './mto.js';
+import { view3d, getTheme } from '../core/theme.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -34,6 +35,7 @@ export class Viewer {
     const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     r.setClearColor(0x05040a, 1);
+    this.palette = view3d();
     r.localClippingEnabled = false;
     this.host.prepend(r.domElement);
 
@@ -49,8 +51,9 @@ export class Viewer {
     this.controls.screenSpacePanning = true;
     this.controls.addEventListener('change', () => this.requestRender());
 
-    this.scene.add(new THREE.HemisphereLight(0xbfe9ff, 0x2a1038, 1.1));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    this.hemi = new THREE.HemisphereLight(0xbfe9ff, 0x2a1038, 1.1);
+    this.scene.add(this.hemi);
+    const sun = this.sun = new THREE.DirectionalLight(0xffffff, 1.5);
     sun.position.set(0.6, 1, 0.35);
     this.scene.add(sun);
     this.headlight = new THREE.DirectionalLight(0xffffff, 0.7);
@@ -90,6 +93,38 @@ export class Viewer {
     this._loop = this._loop.bind(this);
     this._raf = requestAnimationFrame(this._loop);
     this.buildGrid(200);
+    this._onTheme = () => this.setTheme(getTheme());
+    window.addEventListener('r3d:theme', this._onTheme);
+    this.setTheme(getTheme());
+  }
+
+  /** Apply the 3D palette of a UI theme (background, grid, lights, highlight colours). */
+  setTheme(id) {
+    const p = this.palette = view3d(id);
+    const [top, bottom] = p.bg;
+    if (top === bottom) { this.scene.background = new THREE.Color(top); }
+    else {
+      const c = document.createElement('canvas');
+      c.width = 2; c.height = 256;
+      const g = c.getContext('2d');
+      const grad = g.createLinearGradient(0, 0, 0, 256);
+      grad.addColorStop(0, top); grad.addColorStop(1, bottom);
+      g.fillStyle = grad; g.fillRect(0, 0, 2, 256);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.scene.background?.dispose?.();
+      this.scene.background = tex;
+    }
+    this.hemi.color.set(p.hemi[0]); this.hemi.groundColor.set(p.hemi[1]); this.hemi.intensity = p.hemi[2];
+    this.sun.intensity = p.sun;
+    this.scene.environmentIntensity = p.env;
+    MAT_SEL.color.set(p.sel); MAT_SEL.emissive.set(p.selEmissive);
+    MAT_XRAY.color.set(p.xray); MAT_XRAY.opacity = id === 'cloud' ? 0.08 : 0.05;
+    this.scene.traverse((o) => {
+      if (o.userData?.edge && o.material) { o.material.color.set(p.edge); o.material.opacity = p.edgeOpacity; }
+    });
+    if (this.section?.helper) this.section.helper.material.color.set(p.box);
+    this.buildGrid(this._gridSize || 200, this._gridY || 0);
   }
 
   on(type, fn) { (this.listeners[type] ||= new Set()).add(fn); return () => this.listeners[type].delete(fn); }
@@ -288,12 +323,14 @@ export class Viewer {
 
   buildGrid(size = 200, y = 0) {
     this.grid.clear();
+    this._gridSize = size; this._gridY = y;
+    const p = this.palette || view3d();
     size = Math.max(20, size);
     const step = niceStep(size / 30);
     const n = Math.ceil(size / step);
-    const minor = new THREE.GridHelper(n * step, n, 0x0e3a4c, 0x0b2534);
-    const major = new THREE.GridHelper(n * step, Math.max(1, Math.round(n / 5)), 0x00b8c8, 0x145a6c);
-    [minor, major].forEach((g, i) => { g.material.transparent = true; g.material.opacity = i ? 0.45 : 0.35; g.material.depthWrite = false; g.position.y = y - 0.02 - i * 0.001; g.userData.helper = true; this.grid.add(g); });
+    const minor = new THREE.GridHelper(n * step, n, p.gridMinor, p.gridMinor);
+    const major = new THREE.GridHelper(n * step, Math.max(1, Math.round(n / 5)), p.gridMajor, p.gridMajor);
+    [minor, major].forEach((g, i) => { g.material.transparent = true; g.material.opacity = p.gridOpacity[i]; g.material.depthWrite = false; g.position.y = y - 0.02 - i * 0.001; g.userData.helper = true; this.grid.add(g); });
     const c = this.boundsOf().getCenter(new THREE.Vector3());
     if (isFinite(c.x)) this.grid.position.set(Math.round(c.x / step) * step, 0, Math.round(c.z / step) * step);
     this.gridStep = step;
@@ -329,7 +366,7 @@ export class Viewer {
 
   // ---------- measure ----------
   setMode(mode) { this.mode = mode; if (mode !== 'measure') this.pendingPt = null; this.emit('mode', mode); }
-  _marker(p, color = 0xf7ef00) {
+  _marker(p, color = this.palette.measure) {
     const r = Math.max(0.05, (this.gridStep || 5) * 0.04);
     const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
     m.position.copy(p); m.renderOrder = 999; m.userData.helper = true;
@@ -341,7 +378,7 @@ export class Viewer {
     const a = this.pendingPt.p, b = p.clone();
     const m2 = this._marker(b);
     const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xf7ef00, depthTest: false }));
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: this.palette.measure, depthTest: false }));
     line.renderOrder = 998;
     this.fx.add(line);
     const d = a.distanceTo(b);
@@ -400,7 +437,7 @@ export class Viewer {
       P[4].set(new THREE.Vector3(0, 0, 1), -b.min.z);
       P[5].set(new THREE.Vector3(0, 0, -1), b.max.z);
       this.renderer.clippingPlanes = P;
-      const helper = new THREE.Box3Helper(b.clone(), 0xff2fd0);
+      const helper = new THREE.Box3Helper(b.clone(), this.palette.box);
       helper.userData.helper = true;
       this.section.helper = helper;
       this.fx.add(helper);
@@ -461,6 +498,7 @@ export class Viewer {
   get recording() { return !!this._rec; }
 
   dispose() {
+    window.removeEventListener('r3d:theme', this._onTheme);
     cancelAnimationFrame(this._raf);
     this._ro.disconnect();
     this.clear();

@@ -1,18 +1,41 @@
 {
-  "name": "NEXUS 3D Review by YMD",
-  "short_name": "NEXUS 3D",
-  "description": "Plot plan PDF to 3D, contractor model review, clash detection, MTO and deliverable tracking.",
+  "name": "Review 3D by Yan Malegi Diardi",
+  "short_name": "Review 3D",
+  "description": "Plot plan PDF to 3D, contractor model review, clash detection, MTO and deliverable tracking. © 2026 Yan Malegi Diardi.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#07060c",
-  "theme_color": "#07060c",
-  "categories": ["productivity", "business", "utilities"],
+  "background_color": "#eef1f0",
+  "theme_color": "#eef1f0",
+  "categories": [
+    "productivity",
+    "business",
+    "utilities"
+  ],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
   ]
 }

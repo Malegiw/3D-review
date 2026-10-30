@@ -14,7 +14,7 @@ export function colRef(i) {
  * sheets: [{ name, title?, columns: [{ header, key, width?, type?: 'n'|'s', dp? }], rows: [obj] }]
  * Returns a Blob.
  */
-export function buildXlsx(sheets, { creator = 'NEXUS 3D Review by YMD' } = {}) {
+export function buildXlsx(sheets, { creator = 'Review 3D by Yan Malegi Diardi' } = {}) {
   const files = {};
   const sheetEntries = sheets.map((sh, i) => ({ ...sh, idx: i + 1, safe: esc(String(sh.name || `Sheet${i + 1}`).replace(/[\\/?*[\]:]/g, ' ').slice(0, 31)) }));
 

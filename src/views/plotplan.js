@@ -1,13 +1,16 @@
 // Plot plan editor: PDF → picked outlines → categorised objects with heights → 3D.
 import { h, icon, toast, confirmDialog, formDialog, pickFiles, fmt, uid } from '../core/ui.js';
 import { db } from '../core/db.js';
-import { CATS } from '../core/domain.js';
+import { CATS as BASE_CATS } from '../core/domain.js';
+import { catColor } from '../core/theme.js';
 import { go, projectRoute, state } from '../core/app.js';
 import { openPdf, renderPage, analyzePage, closePdf } from '../engine/pdf.js';
 import { shapeContains, tagInside, bboxOf } from '../engine/pdfvector.js';
 import { putGround } from '../engine/ground.js';
 
 const NS = 'http://www.w3.org/2000/svg';
+// category definitions with the colours of the active theme
+const CATS = new Proxy(BASE_CATS, { get: (t, k) => (typeof k === 'string' && t[k] ? { ...t[k], color: catColor(k, t[k].color) } : t[k]) });
 const S = (tag, attrs = {}) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v); return e; };
 const PT_PER_M_1 = 72 / 0.0254; // points per metre at 1:1
 const scaleFromRatio = (n) => n / PT_PER_M_1;
@@ -98,7 +101,7 @@ export async function renderPlot(main, project) {
       const c = CATS[o.cat] || CATS.equipment;
       const p = S('path', { d: shapePath(o.shape), class: `obj ${o.id === selId ? 'sel' : ''}`, fill: o.shape.kind === 'line' || c.kind === 'wall' ? 'none' : `${c.color}2a`, stroke: c.color });
       gObjs.append(p);
-      if (o.tag) { const [x, y] = centroid(o.shape); const t = S('text', { x, y, fill: c.color, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-family': 'Share Tech Mono, monospace', 'pointer-events': 'none' }); t.textContent = o.tag; gObjs.append(t); }
+      if (o.tag) { const [x, y] = centroid(o.shape); const t = S('text', { x, y, fill: c.color, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-family': 'JetBrains Mono Variable, Share Tech Mono, monospace', 'pointer-events': 'none' }); t.textContent = o.tag; gObjs.append(t); }
     }
     updateLabels();
   }
@@ -124,7 +127,7 @@ export async function renderPlot(main, project) {
     closePdf(pdfDoc);
     pdfDoc = null;
     if (!plan?.pdf) { drawShapes(); fit(); redraw(); setHint(); return; }
-    setHint('RENDERING PDF…');
+    setHint('Rendering PDF…');
     pdfDoc = await openPdf(plan.pdf);
     const page = await pdfDoc.getPage(Math.min(plan.page || 1, pdfDoc.numPages));
     const { canvas, vp1 } = await renderPage(page);
@@ -132,13 +135,13 @@ export async function renderPlot(main, project) {
     canvasHolder.append(canvas);
     putGround(plan, canvas);
     drawShapes(); fit();
-    setHint('ANALYSING VECTORS…');
+    setHint('Analysing vectors…');
     const res = await analyzePage(page, { minSize: plan.minSize || 6 });
     shapes = res.shapes; texts = res.texts;
     drawShapes(); redraw();
     setHint();
-    if (!shapes.length) toast('No vector outlines found — this looks like a scanned PDF. Trace objects with the Rect / Circle / Polygon tools.', 'warn', 'RASTER PDF');
-    else toast(`${shapes.length} outlines · ${texts.length} text labels detected.`, 'ok', 'VECTORS');
+    if (!shapes.length) toast('No vector outlines found — this looks like a scanned PDF. Trace objects with the Rect / Circle / Polygon tools.', 'warn', 'Raster PDF');
+    else toast(`${shapes.length} outlines · ${texts.length} text labels detected.`, 'ok', 'Vectors');
   }
 
   async function newPlanFromFile(file) {
@@ -148,9 +151,9 @@ export async function renderPlot(main, project) {
     plan = p;
     await loadPdf();
     renderTools();
-    const v = await formDialog({ title: 'Drawing scale', eyebrow: 'SET SCALE', submitLabel: 'Apply', fields: [{ id: 'ratio', label: 'Scale 1 : N (as printed on the title block)', type: 'number', value: 500, required: true }] });
+    const v = await formDialog({ title: 'Drawing scale', eyebrow: 'Set scale', submitLabel: 'Apply', fields: [{ id: 'ratio', label: 'Scale 1 : N (as printed on the title block)', type: 'number', value: 500, required: true }] });
     if (v?.ratio) { plan.scale = scaleFromRatio(v.ratio); plan.scaleNote = `1:${v.ratio}`; savePlan(); renderTools(); renderSide(); }
-    toast('Tip: use Calibrate on a known dimension to verify the scale.', 'info', 'SCALE');
+    toast('Tip: use Calibrate on a known dimension to verify the scale.', 'info', 'Scale');
   }
 
   // ---------- interaction ----------
@@ -264,12 +267,12 @@ export async function renderPlot(main, project) {
     const [a, b] = draft.pts;
     draft = null; drawUi();
     const dpt = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const v = await formDialog({ title: 'Calibrate scale', eyebrow: `PICKED ${dpt.toFixed(1)} PT ON PAPER`, submitLabel: 'Apply', fields: [{ id: 'm', label: 'Real distance between the two points (m)', type: 'number', required: true, value: '' }] });
+    const v = await formDialog({ title: 'Calibrate scale', eyebrow: `Picked ${dpt.toFixed(1)} pt on paper`, submitLabel: 'Apply', fields: [{ id: 'm', label: 'Real distance between the two points (m)', type: 'number', required: true, value: '' }] });
     if (v?.m > 0) {
       plan.scale = v.m / dpt;
       plan.scaleNote = `calibrated ≈ 1:${ratioFromScale(plan.scale)}`;
       savePlan(); renderTools(); renderSide();
-      toast(`Scale set to ≈ 1:${ratioFromScale(plan.scale)}.`, 'ok', 'CALIBRATED');
+      toast(`Scale set to ≈ 1:${ratioFromScale(plan.scale)}.`, 'ok', 'Calibrated');
     }
     setMode('select');
   }
@@ -283,14 +286,14 @@ export async function renderPlot(main, project) {
   function setHint(msg) {
     if (msg) { hint.textContent = msg; hint.hidden = false; return; }
     const M = {
-      select: 'TAP AN OUTLINE TO PICK IT · DRAG TO PAN · PINCH / WHEEL TO ZOOM',
-      rect: 'DRAG TO DRAW A RECTANGLE (EQUIPMENT, BUILDING, PAD)',
-      circle: 'DRAG FROM CENTRE TO DRAW A CIRCLE (TANK, VESSEL)',
-      poly: draft?.pts?.length ? `${draft.pts.length} PTS · TAP FIRST POINT OR DOUBLE-TAP TO CLOSE` : 'TAP CORNERS OF THE OUTLINE',
-      line: draft?.pts?.length ? `${draft.pts.length} PTS · DOUBLE-TAP OR PRESS FINISH` : 'TAP POINTS ALONG THE PIPE / LINE ROUTE',
-      calib: draft?.pts?.length ? 'TAP THE SECOND POINT' : 'TAP TWO POINTS OF A KNOWN DIMENSION',
+      select: 'Tap an outline to pick it. Drag to pan, pinch or scroll to zoom.',
+      rect: 'Drag to draw a rectangle (equipment, building, pad).',
+      circle: 'Drag from the centre to draw a circle (tank, vessel).',
+      poly: draft?.pts?.length ? `${draft.pts.length} points. Tap the first point or double-tap to close.` : 'Tap the corners of the outline.',
+      line: draft?.pts?.length ? `${draft.pts.length} points. Double-tap or press Finish.` : 'Tap points along the pipe or line route.',
+      calib: draft?.pts?.length ? 'Tap the second point.' : 'Tap two points of a known dimension.',
     };
-    hint.textContent = plan ? M[mode] : 'UPLOAD A PLOT PLAN PDF TO START';
+    hint.textContent = plan ? M[mode] : 'Upload a plot plan PDF to start.';
     hint.hidden = false;
   }
 
@@ -397,7 +400,7 @@ export async function renderPlot(main, project) {
     applyView();
   }
   async function settings() {
-    const v = await formDialog({ title: 'Plot plan settings', eyebrow: 'PLOT PLAN', fields: [
+    const v = await formDialog({ title: 'Plot plan settings', eyebrow: 'Plot plan', fields: [
       { id: 'name', label: 'Name', value: plan.name, required: true, span: true },
       { id: 'ratio', label: 'Scale 1 : N', type: 'number', value: ratioFromScale(plan.scale) },
       { id: 'minSize', label: 'Ignore outlines smaller than (pt)', type: 'number', value: plan.minSize || 6 },

@@ -1,9 +1,10 @@
-// Cache of neon ground textures rendered from plot plan PDFs.
+// Cache of plot plan ground textures (per theme) rendered from plot plan PDFs.
 import { openPdf, renderPage, closePdf } from './pdf.js';
 import { neonGround } from './plotbuild.js';
+import { getTheme } from '../core/theme.js';
 
 const cache = new Map();
-const keyOf = (plan) => `${plan.id}:${plan.page || 1}:${plan.pdf?.size || 0}`;
+const keyOf = (plan) => `${plan.id}:${plan.page || 1}:${plan.pdf?.size || 0}:${getTheme()}`;
 
 export function putGround(plan, srcCanvas) {
   if (plan?.pdf && srcCanvas) cache.set(keyOf(plan), neonGround(srcCanvas));

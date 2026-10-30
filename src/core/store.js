@@ -111,7 +111,7 @@ export async function exportProject(pid) {
 
 export async function importProject(file) {
   const z = unzipSync(new Uint8Array(await file.arrayBuffer()));
-  if (!z['project.json']) throw new Error('Not a NEXUS backup (project.json missing).');
+  if (!z['project.json']) throw new Error('Not a Review 3D backup (project.json missing).');
   const data = JSON.parse(strFromU8(z['project.json']));
   if (data.format !== 'nexus3d-backup') throw new Error('Unknown backup format.');
   const exists = await db.get('projects', data.project.id);

@@ -16,6 +16,7 @@ import { NATIVE_EXT, getConverter, startConversion, projectJobs, retryJob, remov
 import { openConverterSetup } from './converter-setup.js';
 
 const STATUS = ['New', 'Active', 'Reviewed', 'Approved', 'Resolved'];
+const MODE_L = { select: 'Select', measure: 'Measure' };
 const STATUS_C = { New: 'var(--red)', Active: 'var(--orange)', Reviewed: 'var(--cyan)', Approved: 'var(--violet)', Resolved: 'var(--green)' };
 
 export async function renderReview(main, project) {
@@ -42,7 +43,7 @@ export async function renderReview(main, project) {
     const todo = [...want.entries()].filter(([id, w]) => viewer.layersVer[id] !== w.rec.updated || !viewer.layers.has(id));
     for (const [id, w] of todo) {
       i++;
-      viewer.setHud('LOADING MODELS', `${i} / ${todo.length} · ${w.rec.name}`);
+      viewer.setHud('Loading models', `${i} / ${todo.length} · ${w.rec.name}`);
       try {
         if (w.kind === 'plotplan') {
           let ground = null;
@@ -56,7 +57,7 @@ export async function renderReview(main, project) {
         viewer.layersVer[id] = w.rec.updated;
       } catch (e) {
         console.error(e);
-        toast(`${w.rec.name}: ${e.message}`, 'err', 'LOAD FAILED');
+        toast(`${w.rec.name}: ${e.message}`, 'err', 'Load failed');
       }
     }
     viewer.setHud('');
@@ -65,7 +66,7 @@ export async function renderReview(main, project) {
 
   const corner = () => {
     const n = viewer.meshes({ visibleOnly: false }).length;
-    viewer.setCorner([['LAYERS', String(viewer.layers.size)], ['OBJECTS', fmt.int(n)], ['GRID', `${viewer.gridStep ?? '—'} m`], ['MODE', viewer.mode.toUpperCase()]]);
+    viewer.setCorner([['Layers', String(viewer.layers.size)], ['Objects', fmt.int(n)], ['Grid', `${viewer.gridStep ?? '—'} m`], ['Mode', MODE_L[viewer.mode] || viewer.mode]]);
   };
 
   // ---------- tool rail & drawer ----------
@@ -127,7 +128,7 @@ export async function renderReview(main, project) {
     const nat = natives[0];
     let object, format;
     try {
-      viewer.setHud('PARSING MODEL', files.map((f) => f.name).join(', '));
+      viewer.setHud('Reading model', files.map((f) => f.name).join(', '));
       ({ object, format } = await loadModelFiles(recFiles));
     } catch (e) {
       viewer.setHud('');
@@ -157,18 +158,18 @@ export async function renderReview(main, project) {
     if (!list?.length) return;
     openPanel('layers');
     for (const f of list) {
-      toast(`Uploading ${f.name} (${fmt.bytes(f.size)}) to the converter…`, 'info', 'CONVERTER');
+      toast(`Uploading ${f.name} (${fmt.bytes(f.size)}) to the converter…`, 'info', 'Converter');
       try {
         const job = await startConversion(project.id, f);
-        if (job.status === 'failed') toast(job.message, 'err', 'UPLOAD FAILED');
-        else toast(`${f.name} is converting on GitHub. It appears here automatically when ready — you can keep working.`, 'ok', 'CONVERTING');
+        if (job.status === 'failed') toast(job.message, 'err', 'Upload failed');
+        else toast(`${f.name} is converting on GitHub. It appears here automatically when ready — you can keep working.`, 'ok', 'Converting');
       } catch (e) { toast(e.message, 'err'); }
     }
   }
   function converterHelp(name) {
     const e = ext(name);
     modal({
-      title: `${NATIVE_FORMATS[e] || e.toUpperCase()} needs the converter`, eyebrow: 'NATIVE FORMAT', wide: true,
+      title: `${NATIVE_FORMATS[e] || e.toUpperCase()} needs the converter`, eyebrow: 'Native format', wide: true,
       body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
         h('p', { class: 'dim2', style: { margin: 0 } }, `.${e} is a closed Autodesk/Trimble format, so it is translated by Autodesk first. Set up the converter once (about 10 minutes), then NWD, NWC, DWFx, DWF, SKP, RVT and IFC files convert from this button and land in the 3D review automatically.`),
         h('div', { class: 'note' }, h('b', {}, 'No setup? '), 'Navisworks Manage/Simulate: Output → Export Scene → FBX, then import the FBX here. SketchUp: File → Export → 3D Model → glTF/DAE/FBX.'),
@@ -187,10 +188,10 @@ export async function renderReview(main, project) {
     }
     if (!list.length) return toast(gh ? 'No converted models in the repository yet.' : 'No converted models found. Set up the converter (⚙) to list models from your repository.', 'warn');
     const label = (m) => `${m.name || m.source || m.file} · ${m.objects ? `${Number(m.objects).toLocaleString()} obj · ` : ''}${fmt.bytes(m.size)}${m.converted ? ` · ${String(m.converted).slice(0, 16).replace('T', ' ')}` : ''}`;
-    const v = await formDialog({ title: 'Model from repository', eyebrow: 'GITHUB · CONVERTED', submitLabel: 'Load', fields: [{ id: 'f', label: 'Model', type: 'select', options: list.map((m, i) => ({ v: String(i), l: label(m) })), span: true }] });
+    const v = await formDialog({ title: 'Model from repository', eyebrow: 'Converted on GitHub', submitLabel: 'Load', fields: [{ id: 'f', label: 'Model', type: 'select', options: list.map((m, i) => ({ v: String(i), l: label(m) })), span: true }] });
     if (!v) return;
     const meta = list[Number(v.f)];
-    viewer.setHud('DOWNLOADING', meta.name || meta.file);
+    viewer.setHud('Downloading', meta.name || meta.file);
     try {
       if (meta.path) {
         await importOutput(project.id, meta);
@@ -249,7 +250,7 @@ export async function renderReview(main, project) {
       if (all.length > 300) tree.append(h('div', { class: 'mono dim', style: { padding: '8px 10px', fontSize: '11px' } }, `+${all.length - 300} more — refine the search`));
       if (!all.length) tree.append(h('div', { class: 'mono dim', style: { padding: '8px 10px', fontSize: '11px' } }, 'No objects.'));
     };
-    shell('Models', 'FEDERATED MODEL',
+    shell('Models', 'Federated model',
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn sm primary', onclick: importFiles }, icon('upload'), 'Import model'),
         h('button', { class: 'btn sm mag', onclick: () => convertFiles(null) }, icon('zap'), 'Convert NWD · DWFx · SKP'),
@@ -269,7 +270,7 @@ export async function renderReview(main, project) {
           if (L.kind === 'import') { const r = await db.get('models', L.id); if (r) { r.visible = L.visible; await db.put('models', r); viewer.layersVer[L.id] = r.updated; } }
           pLayers();
         } }, icon(L.visible ? 'eye' : 'eyeoff')),
-        h('div', { class: 'nm' }, h('b', {}, L.name), h('span', {}, `${L.kind === 'plotplan' ? 'PLOT PLAN' : 'MODEL'} · ${fmt.int(L.meshes.length)} OBJ${L.kind === 'import' ? ` · ${Object.keys(UNIT_SCALE).find((k) => UNIT_SCALE[k] === L.units) || ''}` : ''}`)),
+        h('div', { class: 'nm' }, h('b', {}, L.name), h('span', {}, `${L.kind === 'plotplan' ? 'Plot plan' : 'Model'} · ${fmt.int(L.meshes.length)} obj${L.kind === 'import' ? ` · ${Object.keys(UNIT_SCALE).find((k) => UNIT_SCALE[k] === L.units) || ''}` : ''}`)),
         L.kind === 'import' ? h('div', { class: 'btn-row', style: { flexWrap: 'nowrap', gap: '4px' } },
           h('button', { class: 'btn sm icon ghost', 'aria-label': 'Layer settings', onclick: () => layerSettings(L) }, icon('gear')),
           h('button', { class: 'btn sm icon ghost', 'aria-label': 'Centre on origin', title: 'Centre on plot plan origin', onclick: () => centerLayer(L) }, icon('target')),
@@ -285,10 +286,10 @@ export async function renderReview(main, project) {
   // ---------- Properties ----------
   function pInfo() {
     const m = viewer.selected;
-    if (!m) return shell('Properties', 'SELECTION', h('p', { class: 'dim2', style: { margin: 0 } }, 'Tap an object in the 3D view. Double-tap zooms to it.'));
+    if (!m) return shell('Properties', 'Selection', h('p', { class: 'dim2', style: { margin: 0 } }, 'Tap an object in the 3D view. Double-tap zooms to it.'));
     const i = viewer.info(m);
     const mtoMat = project.mtoMat?.[m.userData.key] || m.userData.material || guessMaterial(m.name, m.userData.cat);
-    shell(i.name, 'PROPERTIES',
+    shell(i.name, 'Properties',
       h('dl', { class: 'kv' },
         h('dt', {}, 'Layer'), h('dd', {}, i.layer),
         i.cat ? [h('dt', {}, 'Category'), h('dd', {}, CATS[i.cat]?.label || i.cat)] : null,
@@ -312,7 +313,7 @@ export async function renderReview(main, project) {
 
   // ---------- Measure ----------
   function pMeasure() {
-    shell('Measure', 'DISTANCE',
+    shell('Measure', 'Distance',
       h('div', { class: 'note' }, 'Tap two points on the model. Shows true distance, horizontal (H) and vertical (V) components in metres.'),
       viewer.measures.length ? h('div', { class: 'clist' }, viewer.measures.map((m, i) => h('div', { class: 'citem', style: { cursor: 'default' } }, h('span', { class: 'id', style: { color: 'var(--yellow)' } }, `M${i + 1}`), h('div', { class: 'nm mono' }, `${fmt.num(m.d, 3)} m`, h('small', {}, `H ${fmt.num(m.dh, 3)} · V ${fmt.num(m.dv, 3)}`)), h('span', {})))) : null,
       h('div', { class: 'btn-row' }, h('button', { class: 'btn sm ghost', onclick: () => { viewer.clearMeasures(); pMeasure(); } }, icon('trash'), 'Clear'), h('button', { class: 'btn sm', onclick: () => toolClick('measure') }, 'Done')));
@@ -322,7 +323,7 @@ export async function renderReview(main, project) {
   // ---------- Section ----------
   function pSection() {
     const full = viewer.boundsOf();
-    if (full.isEmpty()) return shell('Section box', 'CLIPPING', h('p', { class: 'dim2' }, 'Load a model first.'));
+    if (full.isEmpty()) return shell('Section box', 'Clipping', h('p', { class: 'dim2' }, 'Load a model first.'));
     const pad = full.getSize(new THREE.Vector3()).multiplyScalar(0.02);
     full.expandByVector(pad);
     const cur = viewer.section.on ? viewer.section.box.clone() : full.clone();
@@ -337,7 +338,7 @@ export async function renderReview(main, project) {
       } });
       return h('div', { class: 'field' }, h('label', {}, l), mk('min'), mk('max'));
     });
-    shell('Section box', 'CLIPPING',
+    shell('Section box', 'Clipping',
       h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: viewer.section.on, onchange: (e) => { viewer.setSection(e.target.checked, cur); } }), 'Enable section box'),
       sliders,
       h('div', { class: 'btn-row' },
@@ -348,10 +349,10 @@ export async function renderReview(main, project) {
   // ---------- Viewpoints ----------
   async function pViews() {
     const vps = (await db.byProject('viewpoints', project.id)).sort((a, b) => (a.created || 0) - (b.created || 0));
-    shell('Viewpoints', 'SAVED VIEWS',
+    shell('Viewpoints', 'Saved views',
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn sm primary', onclick: async () => {
-          const v = await formDialog({ title: 'Save viewpoint', eyebrow: 'VIEWPOINT', fields: [{ id: 'name', label: 'Name', value: `View ${vps.length + 1}`, required: true, span: true }, { id: 'comment', label: 'Review comment', type: 'textarea', span: true }] });
+          const v = await formDialog({ title: 'Save viewpoint', eyebrow: 'Viewpoint', fields: [{ id: 'name', label: 'Name', value: `View ${vps.length + 1}`, required: true, span: true }, { id: 'comment', label: 'Review comment', type: 'textarea', span: true }] });
           if (!v) return;
           await db.put('viewpoints', { id: uid('v'), projectId: project.id, name: v.name, comment: v.comment, camera: viewer.getCamera(), thumb: viewer.snapshot(320), section: viewer.section.on ? [viewer.section.box.min.toArray(), viewer.section.box.max.toArray()] : null, created: Date.now() });
           pViews();
@@ -389,7 +390,7 @@ export async function renderReview(main, project) {
         results.append(row);
       });
     };
-    shell('Clash detective', 'INTERFERENCE CHECK',
+    shell('Clash detective', 'Interference check',
       h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr' } },
         h('div', { class: 'field' }, h('label', { for: 'ca' }, 'Selection A'), sel('ca', cfg.a, 'a')),
         h('div', { class: 'field' }, h('label', { for: 'cb' }, 'Selection B'), sel('cb', cfg.b, 'b')),
@@ -410,7 +411,7 @@ export async function renderReview(main, project) {
           const test = { id: uid('c'), projectId: project.id, name: `${cfg.mode === 'hard' ? 'Hard' : `Clearance ${cfg.tol} mm`} · ${nm(cfg.a)} vs ${nm(cfg.b)}`, ...cfg, created: Date.now(), results: res.results, pairsTested: res.pairsTested, seconds: (performance.now() - t0) / 1000 };
           await db.put('clashtests', test);
           lastClash = test.id; current = test;
-          toast(`${res.results.length} clashes · ${fmt.int(res.pairsTested)} pairs · ${test.seconds.toFixed(1)} s`, res.results.length ? 'warn' : 'ok', 'CLASH TEST');
+          toast(`${res.results.length} clashes · ${fmt.int(res.pairsTested)} pairs · ${test.seconds.toFixed(1)} s`, res.results.length ? 'warn' : 'ok', 'Clash test');
           pClash();
         } catch (err) { console.error(err); toast(err.message, 'err'); } finally { btn.disabled = false; prog.hidden = true; }
       } }, icon('zap'), 'Run clash test'),
@@ -469,10 +470,10 @@ export async function renderReview(main, project) {
       h('div', { class: 'lbl' }, `Largest items · ${rows.length} total`),
       h('div', { class: 'clist' }, rows.slice().sort((a, b) => b.volume - a.volume).slice(0, 60).map((r) => h('div', { class: 'citem', onclick: () => { const m = viewer.findByKey(r.key); if (m) { viewer.select(m); viewer.fit(m); } } },
         h('span', { class: 'chip', style: { '--c': MATERIALS[r.material]?.color } }, SHORT[r.material] || r.material),
-        h('div', { class: 'nm' }, r.name, h('small', {}, `${fmt.num(r.L)}×${fmt.num(r.W)}×${fmt.num(r.H)} m${r.closed ? '' : ' · OPEN'}`)),
+        h('div', { class: 'nm' }, r.name, h('small', {}, `${fmt.num(r.L)}×${fmt.num(r.W)}×${fmt.num(r.H)} m${r.closed ? '' : ' · open'}`)),
         h('span', { class: 'mono', style: { fontSize: '12px' } }, `${fmt.num(r.volume, 3)} m³`))))].filter(Boolean));
     };
-    shell('MTO quantities', 'MATERIAL TAKE-OFF',
+    shell('MTO quantities', 'Material take-off',
       h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr 1fr' } },
         h('div', { class: 'field', style: { gridColumn: '1 / -1' } }, h('label', { for: 'ms' }, 'Scope'), h('select', { class: 'inp', id: 'ms', onchange: (e) => { scope = e.target.value; } }, h('option', { value: 'all' }, 'All visible objects'), layers.map((L) => h('option', { value: L.id }, L.name)))),
         h('div', { class: 'field' }, h('label', { for: 'dc' }, 'Concrete kg/m³'), h('input', { class: 'inp mono', id: 'dc', type: 'number', value: dens.concrete, oninput: (e) => { dens.concrete = Number(e.target.value); } })),
@@ -534,7 +535,7 @@ export async function renderReview(main, project) {
       if (blob?.size) {
         const extn = mime.includes('mp4') ? 'mp4' : 'webm';
         download(blob, `${(project.code || 'project').replace(/[^\w-]+/g, '_')}_${kind}_${fmt.today()}.${extn}`);
-        toast(`Video saved (${fmt.bytes(blob.size)}, ${extn.toUpperCase()}).`, 'ok', 'RECORDED');
+        toast(`Video saved (${fmt.bytes(blob.size)}, ${extn.toUpperCase()}).`, 'ok', 'Recorded');
       }
     }
     corner();
@@ -542,7 +543,7 @@ export async function renderReview(main, project) {
   function pMotion() {
     const pls = [...viewer.layers.values()].filter((L) => L.kind === 'plotplan');
     const o = { layerId: pls[0]?.id, duration: 9, record: false };
-    shell('Motion & video', 'CINEMATICS',
+    shell('Motion & video', 'Cinematics',
       pls.length ? h('div', { class: 'field' }, h('label', { for: 'ml' }, 'Plot plan layer'), h('select', { class: 'inp', id: 'ml', onchange: (e) => { o.layerId = e.target.value; } }, pls.map((L) => h('option', { value: L.id }, L.name)))) : null,
       h('div', { class: 'field' }, h('label', { for: 'md' }, 'Duration (s)'), h('input', { type: 'range', id: 'md', min: 5, max: 30, value: 9, oninput: (e) => { o.duration = +e.target.value; e.target.nextSibling.textContent = `${e.target.value} s`; } }), h('span', { class: 'mono dim2' }, '9 s')),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', onchange: (e) => { o.record = e.target.checked; } }), h('span', { class: 'rec-dot' }), 'Record to video file'),
@@ -560,7 +561,7 @@ export async function renderReview(main, project) {
   buildIfEmpty();
   function buildIfEmpty() {
     if (!viewer.layers.size) {
-      viewer.setHud('NO MODELS LOADED', 'IMPORT A MODEL OR GENERATE A PLOT PLAN');
+      viewer.setHud('No models loaded', 'Import a model or generate a plot plan');
       openPanel('layers');
     }
   }

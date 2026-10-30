@@ -1,7 +1,7 @@
 // Packs the Vite build into ONE self-contained HTML file (CSS, fonts, app JS, pdf.js worker and samples inlined).
 // Output:
-//   dist/nexus3d.html          full document — double-click to run offline on a laptop
-//   dist/nexus3d.preview.html  same content without <html>/<head>/<body> — for sandboxed hosts that wrap the page
+//   dist/review3d.html         full document — double-click to run offline on a laptop
+//   dist/review3d.preview.html same content without <html>/<head>/<body> — for sandboxed hosts that wrap the page
 // Usage: npm run build:single
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,10 +26,11 @@ const workerJs = worker ? safe(fs.readFileSync(path.join(dist, 'assets', worker)
 const b64 = (p) => (fs.existsSync(p) ? fs.readFileSync(p).toString('base64') : '');
 const samples = JSON.stringify({ pdf: b64(path.join(dist, 'samples', 'sample-plotplan.pdf')), glb: b64(path.join(dist, 'samples', 'sample-contractor-model.glb')) });
 
-const meta = `<title>NEXUS 3D Review</title>
+const meta = `<title>Review 3D</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="NEXUS 3D Review by YMD — plot plan PDF to 3D, contractor model review, clash detection, MTO and deliverable tracking.">
-<meta name="theme-color" content="#07060c">`;
+<meta name="description" content="Review 3D by Yan Malegi Diardi — plot plan PDF to 3D, contractor model review, clash detection, MTO and deliverable tracking.">
+<meta name="author" content="Yan Malegi Diardi">
+<meta name="theme-color" content="#eef1f0">`;
 const body = `<style>${css}</style>
 <div id="app" aria-live="polite"></div>
 <div id="toasts" class="toasts" role="status"></div>
@@ -38,7 +39,7 @@ const body = `<style>${css}</style>
 <script type="module">${js}</script>`;
 
 const full = `<!doctype html>
-<html lang="en">
+<html lang="id">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -52,7 +53,7 @@ ${body}
 // Sandboxed hosts already pad :root by the safe-area insets, so the app must not add them a second time.
 const preview = `${meta}\n${body}\n<style>:root{--sa-top:0px;--sa-bottom:0px}</style>\n`;
 
-fs.writeFileSync(path.join(dist, 'nexus3d.html'), full);
-fs.writeFileSync(path.join(dist, 'nexus3d.preview.html'), preview);
+fs.writeFileSync(path.join(dist, 'review3d.html'), full);
+fs.writeFileSync(path.join(dist, 'review3d.preview.html'), preview);
 const mb = (s) => (Buffer.byteLength(s) / 1048576).toFixed(2);
-console.log(`single-file: dist/nexus3d.html ${mb(full)} MB · dist/nexus3d.preview.html ${mb(preview)} MB`);
+console.log(`single-file: dist/review3d.html ${mb(full)} MB · dist/review3d.preview.html ${mb(preview)} MB`);

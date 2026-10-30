@@ -6,7 +6,7 @@ import { exportProject } from '../core/store.js';
 import { go, projectRoute, state } from '../core/app.js';
 import { projectDialog } from './home.js';
 
-const kpi = (v, l, color) => h('div', { class: 'panel kpi' }, h('div', { class: 'v', style: color ? { color, textShadow: `0 0 12px ${color}66` } : null }, v), h('div', { class: 'l' }, l));
+const kpi = (v, l, color) => h('div', { class: 'panel kpi' }, h('div', { class: 'v', style: color ? { color } : null }, v), h('div', { class: 'l' }, l));
 
 export async function renderOverview(main, project) {
   const page = h('div', { class: 'page' });
@@ -33,9 +33,9 @@ export async function renderOverview(main, project) {
 
   page.append(
     h('div', { class: 'page-head' },
-      h('div', {}, h('div', { class: 'eyebrow' }, `${project.code || 'PROJECT'} · ${project.phase || ''}`), h('h1', {}, project.name),
+      h('div', {}, h('div', { class: 'eyebrow' }, `${project.code || 'Project'} · ${project.phase || ''}`), h('h1', {}, project.name),
         h('div', { class: 'mono dim', style: { display: 'flex', flexWrap: 'wrap', gap: '6px 16px', fontSize: '12px' } },
-          h('span', {}, project.facility || '—'), h('span', {}, `CLIENT ${project.client || '—'}`), h('span', {}, `CONTRACTOR ${project.contractor || '—'}`), h('span', {}, `${fmt.date(project.start)} → ${fmt.date(project.finish)}`))),
+          h('span', {}, project.facility || '—'), h('span', {}, `Client ${project.client || '—'}`), h('span', {}, `Contractor ${project.contractor || '—'}`), h('span', {}, `${fmt.date(project.start)} → ${fmt.date(project.finish)}`))),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn ghost sm', onclick: async () => {
           const v = await projectDialog(project);
@@ -68,7 +68,7 @@ export async function renderOverview(main, project) {
     h('div', { class: 'grid two' },
       h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Status distribution'), h('a', { class: 'btn sm ghost', href: `#${projectRoute(project.id, 'docs')}` }, 'Open list')),
         st.total ? [stack, legend] : h('p', { class: 'dim2' }, 'No deliverables yet.')),
-      h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Next due'), h('span', { class: 'mono dim', style: { fontSize: '12px' } }, `TODAY ${fmt.date(today)}`)),
+      h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Next due'), h('span', { class: 'mono dim', style: { fontSize: '12px' } }, `Today ${fmt.date(today)}`)),
         upcoming.length ? h('div', { class: 'clist' }, upcoming.map((d) => h('div', { class: 'citem', style: { cursor: 'default', borderColor: isOverdue(d) ? 'var(--red)' : null } },
           h('span', { class: 'chip', style: { '--c': statusOf(d.status).c } }, d.status), h('div', { class: 'nm' }, d.title, h('small', {}, d.docNo)),
           h('span', { class: 'mono', style: { fontSize: '12px', color: isOverdue(d) ? 'var(--red)' : 'var(--fg-2)' } }, fmt.date(d.planDate))))) : h('p', { class: 'dim2' }, 'Nothing pending.'))),
@@ -115,7 +115,7 @@ export async function renderDocs(main, project) {
 
   const save = async (d) => { await db.put('deliverables', d); };
   const edit = async (d) => {
-    const v = await formDialog({ title: d ? 'Edit deliverable' : 'Add deliverable', eyebrow: 'DOCUMENT REGISTER', fields: docFields(d || {}), wide: true });
+    const v = await formDialog({ title: d ? 'Edit deliverable' : 'Add deliverable', eyebrow: 'Document register', fields: docFields(d || {}), wide: true });
     if (!v) return;
     if (d) Object.assign(d, v); else { d = { id: uid('d'), projectId: project.id, ...v }; docs.push(d); }
     await save(d);
@@ -129,7 +129,7 @@ export async function renderDocs(main, project) {
     tbody.innerHTML = '';
     for (const d of list) {
       const s = statusOf(d.status);
-      const stSel = h('select', { class: 'inp', 'aria-label': 'Status', style: { borderLeftColor: s.c, color: s.c }, onchange: async (e) => {
+      const stSel = h('select', { class: 'inp st-sel', 'aria-label': 'Status', style: { borderLeftColor: s.c, color: s.c }, onchange: async (e) => {
         d.status = e.target.value;
         if (statusOf(d.status).w >= 60 && !d.actualDate) d.actualDate = fmt.today();
         await save(d); draw();
@@ -155,7 +155,7 @@ export async function renderDocs(main, project) {
     }
     if (!list.length) tbody.append(h('tr', {}, h('td', { colspan: 11, class: 'dim2', style: { textAlign: 'center', padding: '28px' } }, docs.length ? 'No documents match the filter.' : 'No deliverables yet — add one or import a CSV.')));
     const st = docStats(docs);
-    summary.textContent = `${list.length} OF ${docs.length} SHOWN · PROGRESS ${fmt.pct(st.progress)} · OVERDUE ${st.overdue}`;
+    summary.textContent = `${list.length} of ${docs.length} shown · progress ${fmt.pct(st.progress)} · overdue ${st.overdue}`;
   }
 
   const exportX = () => {

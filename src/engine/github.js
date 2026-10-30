@@ -45,7 +45,7 @@ export class GitHubRepo {
       body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
-      throw new GitHubError(0, 'Cannot reach GitHub from this page (offline, or a preview sandbox that blocks network). Use the app from GitHub Pages or nexus3d.html.');
+      throw new GitHubError(0, 'Cannot reach GitHub from this page (offline, or a preview sandbox that blocks network). Use the app from GitHub Pages or review3d.html.');
     }
     if (raw && res.ok) return res;
     const text = await res.text();

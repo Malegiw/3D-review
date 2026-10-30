@@ -1,11 +1,12 @@
 // Tiny DOM + UI helpers (no framework).
+import { locale } from './i18n.js';
 
 export function h(tag, attrs = {}, ...kids) {
   const el = tag === 'svg' || attrs?.svg ? document.createElementNS('http://www.w3.org/2000/svg', tag) : document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false || k === 'svg') continue;
     if (k === 'class') el.setAttribute('class', v);
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') { for (const [sk, sv] of Object.entries(v)) { if (sv == null) continue; if (sk.startsWith('--')) el.style.setProperty(sk, sv); else el.style[sk] = sv; } }
     else if (k === 'html') el.innerHTML = v;
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'dataset') Object.assign(el.dataset, v);
@@ -64,6 +65,7 @@ const ICONS = {
   rec: 'M12 7a5 5 0 100 10 5 5 0 000-10z',
   orbit: 'M12 9a3 3 0 100 6 3 3 0 000-6zM2 12c0-3 4.5-5.5 10-5.5S22 9 22 12s-4.5 5.5-10 5.5c-2 0-4-.3-5.5-1M6 18l.5-1.8L4.6 15.5',
   db: 'M4 6c0-2 16-2 16 0v12c0 2-16 2-16 0zM4 6c0 2 16 2 16 0M4 12c0 2 16 2 16 0',
+  palette: 'M12 3a9 9 0 100 18c1.2 0 1.6-.9 1.6-1.6 0-1-.8-1.3-.8-2.2 0-.9.8-1.6 1.7-1.6H16a5 5 0 005-5c0-4.3-4-7.6-9-7.6zM7.5 12.5h.01M9.5 8h.01M14.5 8h.01M17 11.5h.01',
   github: 'M9 19c-4 1.5-4-2-6-2.5M15 22v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 00-1.3-3.2 4.2 4.2 0 00-.1-3.2s-1-.3-3.4 1.3a11.6 11.6 0 00-6 0C6.8 2.8 5.8 3.1 5.8 3.1a4.2 4.2 0 00-.1 3.2A4.6 4.6 0 004.4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V22',
 };
 
@@ -84,15 +86,16 @@ export function icon(name, cls = '') {
 }
 
 export function logoMark() {
+  // Isometric cube: one face per working view (plan, elevation, 3D). Face colours come from the theme.
   const wrap = document.createElement('span');
-  wrap.innerHTML = `<svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2l12 7v14l-12 7-12-7V9z" fill="none" stroke="#00f0ff" stroke-width="1.6"/><path d="M16 2v28M4 9l24 14M28 9L4 23" stroke="#ff2fd0" stroke-width="1" opacity=".7"/><path d="M11 21V11l10 10V11" fill="none" stroke="#f7ef00" stroke-width="2.2"/></svg>`;
+  wrap.innerHTML = `<svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true"><path class="f-top" d="M16 3.2l11.1 6.4L16 16 4.9 9.6z"/><path class="f-left" d="M4.9 9.6L16 16v12.8L4.9 22.4z"/><path class="f-right" d="M27.1 9.6L16 16v12.8l11.1-6.4z"/></svg>`;
   return wrap.firstChild;
 }
 
 export function toast(msg, type = 'info', title) {
   const box = document.getElementById('toasts');
   if (!box) return;
-  const t = h('div', { class: `toast ${type}` }, h('b', {}, title || { info: 'SYSTEM', ok: 'DONE', err: 'ERROR', warn: 'NOTICE' }[type] || 'SYSTEM'), msg);
+  const t = h('div', { class: `toast ${type}` }, h('b', {}, title || { info: 'Info', ok: 'Done', err: 'Error', warn: 'Notice' }[type] || 'Info'), msg);
   box.append(t);
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 320); }, type === 'err' ? 6500 : 3800);
 }
@@ -126,7 +129,7 @@ export function modal({ title, eyebrow, body, actions = [], wide = false, onClos
 export function confirmDialog(message, { title = 'Confirm', okLabel = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {
     modal({
-      title, eyebrow: danger ? 'WARNING' : 'CONFIRM', body: h('p', { style: { margin: 0, color: 'var(--fg-2)' } }, message),
+      title, eyebrow: danger ? 'Warning' : 'Confirm', body: h('p', { style: { margin: 0, color: 'var(--fg-2)' } }, message),
       actions: [{ label: 'Cancel', value: false }, { label: okLabel, kind: danger ? 'danger' : 'primary', value: true }],
       onClose: (v) => resolve(!!v),
     });
@@ -193,7 +196,7 @@ export const fmt = {
     if (!d) return '—';
     const x = new Date(d);
     if (isNaN(x)) return d;
-    return x.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    return x.toLocaleDateString(locale(), { day: '2-digit', month: 'short', year: 'numeric' });
   },
   num(n, dp = 2) {
     if (n == null || !isFinite(n)) return '—';

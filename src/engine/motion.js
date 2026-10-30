@@ -29,7 +29,7 @@ export function playBuildUp(viewer, layer, { duration = 9, onDone } = {}) {
   // scan beam
   const beam = new THREE.Mesh(
     new THREE.BoxGeometry(span * 0.006 + 0.1, Math.max(4, size.y * 1.2), span * 1.15),
-    new THREE.MeshBasicMaterial({ color: 0xff2fd0, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: viewer.palette?.beam ?? 0xff2fd0, transparent: true, opacity: viewer.palette?.beamBlend === 'normal' ? 0.35 : 0.55, blending: viewer.palette?.beamBlend === 'normal' ? THREE.NormalBlending : THREE.AdditiveBlending, depthWrite: false }),
   );
   beam.userData.helper = true;
   beam.position.set(box.min.x, size.y * 0.6, center.z);
@@ -91,10 +91,10 @@ export function playBuildUp(viewer, layer, { duration = 9, onDone } = {}) {
     ctrl.target.copy(center);
     viewer.camera.lookAt(center);
     // HUD
-    if (t < tScan[1]) phase('scan', 'SCANNING PLOT PLAN', `${n} OBJECTS DETECTED`);
-    else if (t < tBuild[1]) phase('build', 'EXTRUDING GEOMETRY', `BUILD ${Math.min(n, Math.round(((t - tBuild[0]) / (tBuild[1] - tBuild[0])) * n))} / ${n}`);
-    else phase('done', 'MODEL ONLINE', `${(size.x).toFixed(0)} m × ${(size.z).toFixed(0)} m · ${n} OBJECTS`);
-    if (lastPhase === 'build') viewer.hudEl.querySelector('small') && (viewer.hudEl.querySelector('small').textContent = `BUILD ${Math.min(n, Math.max(0, Math.round(((t - tBuild[0]) / (tBuild[1] - tBuild[0])) * n)))} / ${n}`);
+    if (t < tScan[1]) phase('scan', 'Scanning plot plan', `${n} objects detected`);
+    else if (t < tBuild[1]) phase('build', 'Extruding geometry', `Build ${Math.min(n, Math.round(((t - tBuild[0]) / (tBuild[1] - tBuild[0])) * n))} / ${n}`);
+    else phase('done', 'Model online', `${(size.x).toFixed(0)} m × ${(size.z).toFixed(0)} m · ${n} objects`);
+    if (lastPhase === 'build') viewer.hudEl.querySelector('small') && (viewer.hudEl.querySelector('small').textContent = `Build ${Math.min(n, Math.max(0, Math.round(((t - tBuild[0]) / (tBuild[1] - tBuild[0])) * n)))} / ${n}`);
     if (t >= T) { finish(); onDone?.(); return false; }
     return true;
   });
@@ -111,7 +111,7 @@ export function playOrbit(viewer, { duration = 12, onDone } = {}) {
   const start = Math.atan2(viewer.camera.position.z - c.z, viewer.camera.position.x - c.x);
   let t = 0, stopped = false;
   viewer.controls.enabled = false;
-  viewer.setHud('ORBIT SCAN', '360° REVIEW');
+  viewer.setHud('Orbit', '360° review');
   viewer.addTicker((dt) => {
     t += dt;
     const k = t / duration;
@@ -137,7 +137,7 @@ export function playTour(viewer, viewpoints, { secPer = 3.2, onDone } = {}) {
     t += dt;
     const k = easeInOut(clamp01(t / dur));
     const idx = Math.min(viewpoints.length - 1, Math.round(k * (viewpoints.length - 1)));
-    viewer.setHud(viewpoints[idx].name.toUpperCase(), `VIEW ${idx + 1} / ${viewpoints.length}`);
+    viewer.setHud(viewpoints[idx].name.toUpperCase(), `View ${idx + 1} / ${viewpoints.length}`);
     viewer.camera.position.copy(P.getPoint(k));
     viewer.controls.target.copy(Tg.getPoint(k));
     viewer.camera.lookAt(viewer.controls.target);

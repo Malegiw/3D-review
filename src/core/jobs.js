@@ -105,7 +105,7 @@ async function advance(gh, job) {
     try { steps = await gh.steps(job.runId); } catch { /* ignore */ }
     Object.assign(job, { status: 'failed', message: run.conclusion === 'cancelled' ? 'The run was cancelled on GitHub.' : failureMessage(steps) });
     await save(job);
-    toast(`${job.file}: ${job.message}`, 'err', 'CONVERSION FAILED');
+    toast(`${job.file}: ${job.message}`, 'err', 'Conversion failed');
     return job;
   }
   Object.assign(job, { status: 'downloading', step: 'Downloading GLB' });
@@ -133,7 +133,7 @@ async function advance(gh, job) {
   Object.assign(job, { status: 'done', step: 'Added to project', modelIds: ids, sizeOut: outs.reduce((n, o) => n + (o.size || 0), 0) });
   await save(job);
   emit('nexus:model-added', { projectId: job.projectId, modelIds: ids });
-  toast(`${job.file} converted and added to the 3D review.`, 'ok', 'MODEL READY');
+  toast(`${job.file} converted and added to the 3D review.`, 'ok', 'Model ready');
   return job;
 }
 

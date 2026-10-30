@@ -2,11 +2,11 @@ import { h, icon, toast, formDialog, pickFiles, fmt } from '../core/ui.js';
 import { db } from '../core/db.js';
 import { docStats, PHASES } from '../core/domain.js';
 import { importProject } from '../core/store.js';
-import { go, projectRoute } from '../core/app.js';
+import { VERSION, COPYRIGHT, go, projectRoute } from '../core/app.js';
 
 export async function projectDialog(p = {}) {
   return formDialog({
-    title: p.id ? 'Edit project' : 'New project', eyebrow: 'PROJECT DATA', submitLabel: p.id ? 'Save' : 'Create',
+    title: p.id ? 'Edit project' : 'New project', eyebrow: 'Project data', submitLabel: p.id ? 'Save' : 'Create',
     fields: [
       { id: 'code', label: 'Project No. / WBS', value: p.code, required: true, mono: true, placeholder: 'e.g. SPHR01149A' },
       { id: 'name', label: 'Project name', value: p.name, required: true, span: true },
@@ -36,7 +36,7 @@ export async function renderHome(main) {
         h('span', { style: { display: 'flex', gap: '6px' } }, p.sample ? h('span', { class: 'chip', style: { '--c': 'var(--yellow)' } }, 'Sample') : null, h('span', { class: 'chip dot', style: { '--c': 'var(--cyan)' } }, p.phase || '—'))),
       h('h2', {}, p.name),
       h('div', { class: 'meta' }, h('span', {}, p.facility || '—'), h('span', {}, `${fmt.date(p.start)} → ${fmt.date(p.finish)}`)),
-      h('div', {}, h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }, class: 'mono dim' }, h('span', {}, 'DELIVERABLE PROGRESS'), h('span', { class: 'neon-c' }, fmt.pct(st.progress))),
+      h('div', {}, h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }, class: 'mono dim' }, h('span', {}, 'Deliverable progress'), h('span', { class: 'neon-c' }, fmt.pct(st.progress))),
         h('div', { class: 'bar' }, h('i', { style: { width: `${st.progress}%` } }))),
       h('div', { class: 'stats' },
         h('div', {}, h('b', {}, st.total), h('span', {}, 'Docs')),
@@ -71,6 +71,6 @@ export async function renderHome(main) {
         h('dt', {}, 'Exports'), h('dd', {}, 'XLSX · GLB-ready · MP4/WebM motion'))),
       h('div', { class: 'panel' }, h('div', { class: 'eyebrow' }, 'Install on phone / iPad'), h('p', { class: 'dim2', style: { margin: '12px 0 0' } },
         'iPhone & iPad: open in Safari → Share → Add to Home Screen. Android: Chrome menu → Install app. Laptop: the install icon in the address bar. Data is stored on each device; use Backup on a project to move it.'))),
-    h('div', { class: 'foot' }, `NEXUS//3D REVIEW · © ${new Date().getFullYear()} Yan Malegi Diardi`),
+    h('div', { class: 'foot' }, h('span', {}, COPYRIGHT), h('span', { class: 'no-i18n' }, `Review 3D v${VERSION}`)),
   );
 }

@@ -80,7 +80,7 @@ export async function openConverterSetup() {
     h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'NWD/NWC engine: nwd-reader by 1817716374 (PolyForm Noncommercial 1.0.0 — free for personal/non-commercial use; commercial use needs a licence from its author). Autodesk formats are sent to Autodesk’s transient storage (auto-deleted after ~24 h). With encryption on, keep the key safe: without it, encrypted results cannot be opened.'));
 
   modal({
-    title: 'Model converter', eyebrow: 'NWD READER · GITHUB ACTIONS', wide: true, body,
+    title: 'Model converter', eyebrow: 'NWD reader on GitHub Actions', wide: true, body,
     actions: [
       { label: 'Check', icon: 'search', onClick: async () => { await check(); return false; } },
       { label: 'Install converter', icon: 'download', kind: 'mag', onClick: async (e) => {
@@ -92,7 +92,7 @@ export async function openConverterSetup() {
           const next = await prepare(gh, info);
           await gh.install(CONVERTER_FILES, (p) => status.replaceChildren(h('span', { class: 'mono dim2' }, `Installing ${p}…`)));
           await setConverter(next);
-          toast(next.encrypted ? 'Converter installed with encryption. Press Save, then convert.' : 'Converter installed. Press Save, then convert NWD/NWC files.', 'ok', 'INSTALLED');
+          toast(next.encrypted ? 'Converter installed with encryption. Press Save, then convert.' : 'Converter installed. Press Save, then convert NWD/NWC files.', 'ok', 'Installed');
           await check();
         } catch (err) { toast(err.message, 'err'); status.replaceChildren(chip(false, err.message)); } finally { btn.disabled = false; }
         return false;

@@ -1,8 +1,12 @@
-# NEXUS//3D Review — by YMD
+# Review 3D — by Yan Malegi Diardi
 
-App review desain 3D untuk proyek fasilitas Oil & Gas: **plot plan 2D (PDF) → model 3D dengan motion**, import model kontraktor, **clash detection**, **MTO volume**, dan **deliverable list** per project. Jalan di **iPhone, iPad, Android, dan laptop** (PWA — bisa di-install ke home screen), tema cyberpunk.
+App review desain 3D untuk proyek fasilitas Oil & Gas: **plot plan 2D (PDF) → model 3D dengan motion**, import model kontraktor, **clash detection**, **MTO volume**, dan **deliverable list** per project. Jalan di **iPhone, iPad, Android, dan laptop** (PWA — bisa di-install ke home screen).
 
-## Fitur v0.1
+**Tampilan:** 3 tema — *Cloud* (terang, default), *Night* (gelap), *Cyberpunk* (neon klasik) — dan bahasa **Indonesia / English**. Ganti lewat tombol ID/EN dan ikon palet di kanan atas; pilihan tersimpan per perangkat.
+
+Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (WGSN 2026), oranye safety hi-vis sebagai satu-satunya warna aksi, font Archivo (lebar untuk judul), panel kaca di atas tampilan 3D.
+
+## Fitur v0.2
 
 | Modul | Isi |
 |---|---|
@@ -29,14 +33,14 @@ npm install
 npm run dev        # buka http://localhost:5173 (atau IP laptop dari HP di Wi-Fi yang sama)
 npm test           # unit test: PDF vector, clash, MTO, XLSX
 npm run build      # output ke dist/
-npm run build:single  # + dist/nexus3d.html (1 file, offline)
+npm run build:single  # + dist/review3d.html (1 file, offline)
 ```
 
 ## Deploy ke GitHub Pages
 
-1. Buat repo baru di GitHub (mis. `nexus3d-review`), push isi folder ini ke branch `main`.
+1. Buat repo baru di GitHub (mis. `3D-review`), push isi folder ini ke branch `main`.
 2. Repo → **Settings → Pages → Source: GitHub Actions**.
-3. Workflow `Deploy to GitHub Pages` jalan otomatis tiap push. URL: `https://<username>.github.io/nexus3d-review/`.
+3. Workflow `Deploy to GitHub Pages` jalan otomatis tiap push. URL: `https://<username>.github.io/3D-review/`.
 
 ### Install di device
 
@@ -74,18 +78,19 @@ Lokal: `NWD2GLB=/path/nwd2glb node tools/nwd-convert.mjs file.nwd --out converte
 
 ## Versi 1 file (offline)
 
-`npm run build:single` → `dist/nexus3d.html`: satu file HTML (CSS, font, app, pdf.js worker, sample) yang bisa dibuka langsung di laptop dengan double-click, tanpa server.
+`npm run build:single` → `dist/review3d.html`: satu file HTML (CSS, font, app, pdf.js worker, sample) yang bisa dibuka langsung di laptop dengan double-click, tanpa server.
 
 ## Struktur
 
 ```
 src/
   main.js            shell, routing (#home, #p-<id>-<tab>), boot
-  core/              db (IndexedDB), domain (status, kategori, material), xlsx writer, backup, UI helpers
+  core/              db (IndexedDB), domain (status, kategori, material), xlsx writer, backup, UI helpers,
+                     theme (Cloud/Night/Cyberpunk), i18n + i18n-id (kamus Bahasa Indonesia)
   engine/            viewer (Three.js), pdf + pdfvector (ekstraksi vektor), plotbuild (2D→3D),
                      motion (build-up, orbit, tour), clash (three-mesh-bvh), mto, loaders
   views/             home, project (overview + docs), plotplan editor, review (3D tools)
-  styles/theme.css   tema cyberpunk
+  styles/theme.css   token 3 tema; fonts.css (Archivo, JetBrains Mono — subset Latin)
 tools/               aps-convert.mjs (APS → SVF → glTF → GLB meshopt), make-sample.mjs
 public/              manifest, service worker, icon, pdf.js fonts/wasm, sample PDF & GLB
 .github/workflows/   deploy.yml (Pages), convert-models.yml (APS)
@@ -111,4 +116,4 @@ public/              manifest, service worker, icon, pdf.js fonts/wasm, sample P
 8. Build native App Store / Play Store via Capacitor.
 
 ---
-© 2026 Yan Malegi Diardi · NEXUS//3D Review
+© 2026 Yan Malegi Diardi. All rights reserved. · Review 3D
