@@ -35,15 +35,20 @@ export async function seedSample() {
   let pdf = null;
   try { const r = await fetch('./samples/sample-plotplan.pdf'); if (r.ok) pdf = await r.blob(); } catch { /* offline */ }
   await db.put('plotplans', { ...samplePlan(pid), pdf });
-  try {
-    const r = await fetch('./samples/sample-contractor-model.glb');
-    if (r.ok) {
-      const blob = await r.blob();
-      await db.put('models', { id: uid('m'), projectId: pid, name: 'EPC Piping & Steel (sample, mm)', files: [{ name: 'sample-contractor-model.glb', blob }], units: 'mm', zUp: false, transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now() });
-    }
-  } catch { /* offline */ }
+  const glb = await fetchSampleModel();
+  if (glb) await db.put('models', { id: uid('m'), projectId: pid, name: 'EPC Piping & Steel (sample, mm)', files: [{ name: 'sample-contractor-model.glb', blob: glb }], units: 'mm', zUp: false, transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now() });
   await db.meta('seeded', true);
   return pid;
+}
+
+// GLB first; base64 JSON copy as fallback for hosts that refuse to serve .glb files.
+async function fetchSampleModel() {
+  try { const r = await fetch('./samples/sample-contractor-model.glb'); if (r.ok) return await r.blob(); } catch { /* fall through */ }
+  try {
+    const r = await fetch('./samples/sample-contractor-model.json');
+    if (r.ok) { const { glb } = await r.json(); return new Blob([Uint8Array.from(atob(glb), (c) => c.charCodeAt(0))], { type: 'model/gltf-binary' }); }
+  } catch { /* offline */ }
+  return null;
 }
 
 /** Sample plot plan (matches public/samples/sample-plotplan.pdf, A3 landscape, 1:500). */

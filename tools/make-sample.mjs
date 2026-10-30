@@ -61,5 +61,7 @@ add('FDN-P-301 SLAB CONCRETE', box(39.5, 19.5, -0.35, 50.5, 23.5, -0.05), mat('C
 
 const io = new NodeIO();
 const out = new URL('../public/samples/sample-contractor-model.glb', import.meta.url);
-fs.writeFileSync(out, await io.writeBinary(doc));
-console.log('wrote', out.pathname, fs.statSync(out).size, 'bytes');
+const bin = await io.writeBinary(doc);
+fs.writeFileSync(out, bin);
+fs.writeFileSync(new URL('../public/samples/sample-contractor-model.json', import.meta.url), JSON.stringify({ glb: Buffer.from(bin).toString('base64') }));
+console.log('wrote', out.pathname, fs.statSync(out).size, 'bytes (+ base64 .json fallback)');
