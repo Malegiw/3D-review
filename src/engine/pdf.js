@@ -1,6 +1,6 @@
 // pdf.js wrapper — legacy build for wider iOS/Android support.
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url'; // non-minified: minifier emits raw control bytes
 import { extractPaths, stitch, classify, textItems } from './pdfvector.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
