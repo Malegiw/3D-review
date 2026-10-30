@@ -3,7 +3,11 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url'; // non-minified: minifier emits raw control bytes
 import { extractPaths, stitch, classify, textItems } from './pdfvector.js';
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+// Single-file builds carry the worker inline (<script id="nx-pdf-worker" type="text/plain">).
+const inlineWorker = document.getElementById('nx-pdf-worker');
+pdfjs.GlobalWorkerOptions.workerSrc = inlineWorker
+  ? URL.createObjectURL(new Blob([inlineWorker.textContent], { type: 'text/javascript' }))
+  : workerUrl;
 const asset = (p) => new URL(p, document.baseURI).href;
 
 /** pdf.js v6 has no doc.destroy(); tear down through the loading task. */

@@ -32,8 +32,8 @@ export async function seedSample() {
   for (const [docNo, title, discipline, type, rev, status, review, p, a, pic] of D) {
     await db.put('deliverables', { id: uid('d'), projectId: pid, docNo, title, discipline, type, rev, status, review, planDate: dayOff(p), actualDate: a == null ? '' : dayOff(a), pic, remarks: '' });
   }
-  let pdf = null;
-  try { const r = await fetch('./samples/sample-plotplan.pdf'); if (r.ok) pdf = await r.blob(); } catch { /* offline */ }
+  let pdf = embeddedSample('pdf', 'application/pdf');
+  if (!pdf) { try { const r = await fetch('./samples/sample-plotplan.pdf'); if (r.ok) pdf = await r.blob(); } catch { /* offline */ } }
   await db.put('plotplans', { ...samplePlan(pid), pdf });
   const glb = await fetchSampleModel();
   if (glb) await db.put('models', { id: uid('m'), projectId: pid, name: 'EPC Piping & Steel (sample, mm)', files: [{ name: 'sample-contractor-model.glb', blob: glb }], units: 'mm', zUp: false, transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now() });
@@ -41,8 +41,19 @@ export async function seedSample() {
   return pid;
 }
 
-// GLB first; base64 JSON copy as fallback for hosts that refuse to serve .glb files.
+// Single-file builds embed the samples as base64 in <script id="nx-samples" type="application/json">.
+function embeddedSample(key, type) {
+  try {
+    const el = document.getElementById('nx-samples');
+    const b64 = el && JSON.parse(el.textContent)[key];
+    return b64 ? new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type }) : null;
+  } catch { return null; }
+}
+
+// Embedded → GLB → base64 JSON copy (for hosts that refuse to serve .glb files).
 async function fetchSampleModel() {
+  const emb = embeddedSample('glb', 'model/gltf-binary');
+  if (emb) return emb;
   try { const r = await fetch('./samples/sample-contractor-model.glb'); if (r.ok) return await r.blob(); } catch { /* fall through */ }
   try {
     const r = await fetch('./samples/sample-contractor-model.json');

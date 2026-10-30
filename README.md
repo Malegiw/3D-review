@@ -28,6 +28,7 @@ npm install
 npm run dev        # buka http://localhost:5173 (atau IP laptop dari HP di Wi-Fi yang sama)
 npm test           # unit test: PDF vector, clash, MTO, XLSX
 npm run build      # output ke dist/
+npm run build:single  # + dist/nexus3d.html (1 file, offline)
 ```
 
 ## Deploy ke GitHub Pages
@@ -44,16 +45,29 @@ npm run build      # output ke dist/
 
 Data (project, PDF, model) tersimpan **di device masing-masing** (IndexedDB, offline). Pindah device → **Backup** di halaman project, lalu **Restore backup** di device lain.
 
-## Converter NWD / DWFx / SKP (sekali setup)
+## Model kontraktor NWD / DWFx / SKP
 
-1. Daftar gratis di <https://aps.autodesk.com> → buat **Application** → catat **Client ID** & **Client Secret**. Model Derivative masuk kuota Free tier APS; pemakaian di atas kuota bulanan perlu paket berbayar.
-2. Repo GitHub → **Settings → Secrets and variables → Actions** → tambah `APS_CLIENT_ID` dan `APS_CLIENT_SECRET`.
-3. Pakai:
-   - File ≤ 100 MB: commit ke `models/incoming/` → workflow **Convert models** jalan → GLB muncul di `public/models/` + `index.json` → app ter-deploy ulang.
+NWD adalah stream biner terkompresi milik Autodesk (`LcUStream`), tidak ada parser open-source — konversinya harus lewat Autodesk.
+
+**Jalur cepat (tanpa setup):** buka di Navisworks Manage/Simulate → *Output → Export Scene → FBX* → import FBX di app. (Navisworks Freedom tidak bisa export.) SketchUp: *File → Export → 3D Model → glTF/DAE/FBX*.
+
+**Jalur otomatis (GitHub Actions + Autodesk APS):**
+
+1. Daftar gratis di <https://aps.autodesk.com> → buat **Application** (Traditional Web App / server-to-server) → catat **Client ID** & **Client Secret**. Model Derivative masuk kuota Free tier APS bulanan.
+2. Buat repo **PRIVATE** untuk konversi (mis. `nexus3d-converter`, isi sama dengan repo ini). Model PHR/SKK Migas adalah dokumen perusahaan — **jangan** taruh di repo publik.
+3. Repo → **Settings → Secrets and variables → Actions** → tambah `APS_CLIENT_ID` dan `APS_CLIENT_SECRET`.
+4. Konversi:
+   - File ≤ 100 MB: commit ke `models/incoming/`.
    - File besar: **Actions → Convert models → Run workflow** → isi *direct download link*.
-4. Di app: **3D Review → Models → From repository** → pilih model.
+5. Buka run tersebut → **Summary → Artifacts → nexus3d-glb** → download → di app: **3D Review → Models → Import model** (unit & up-axis terisi otomatis dari metadata).
 
-Lokal juga bisa: `cd tools && npm ci && APS_CLIENT_ID=… APS_CLIENT_SECRET=… node aps-convert.mjs file.nwd --out ../public/models`.
+Catatan: file diunggah ke bucket *transient* Autodesk (terhapus otomatis ±24 jam) — pastikan sesuai kebijakan data perusahaan. Opsi `PUBLISH_MODELS=true` (repository variable) menaruh GLB di GitHub Pages dan menampilkannya di **Models → From repository** — hanya untuk model yang boleh publik.
+
+Lokal juga bisa: `cd tools && npm ci && APS_CLIENT_ID=… APS_CLIENT_SECRET=… node aps-convert.mjs file.nwd --out ../converted`.
+
+## Versi 1 file (offline)
+
+`npm run build:single` → `dist/nexus3d.html`: satu file HTML (CSS, font, app, pdf.js worker, sample) yang bisa dibuka langsung di laptop dengan double-click, tanpa server.
 
 ## Struktur
 

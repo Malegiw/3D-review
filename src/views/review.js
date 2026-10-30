@@ -151,9 +151,10 @@ export async function renderReview(main, project) {
     modal({
       title: `${NATIVE_FORMATS[e] || e.toUpperCase()} needs conversion`, eyebrow: 'NATIVE FORMAT', wide: true,
       body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
-        h('p', { class: 'dim2', style: { margin: 0 } }, `.${e} is a closed Autodesk/Trimble format, so no browser can read it directly. Two routes:`),
-        h('div', { class: 'note' }, h('b', {}, 'A · Automatic (GitHub + Autodesk APS). '), 'Commit the file to ', h('span', { class: 'mono' }, 'models/incoming/'), ' in this app’s GitHub repo (or run the “Convert models” workflow with a download link). The workflow translates it with Autodesk Model Derivative, converts to compressed GLB and publishes it. Then open Models → ', h('b', {}, 'From repository'), '.'),
-        h('div', { class: 'note' }, h('b', {}, 'B · Ask for an export. '), 'Navisworks: Output → Export Scene → FBX. SketchUp: File → Export → 3D Model → glTF/DAE/FBX. Revit: Export → FBX. AVEVA/PDMS/E3D and Tekla: FBX or IFC→GLB.'),
+        h('p', { class: 'dim2', style: { margin: 0 } }, `.${e} is a closed Autodesk/Trimble format, so no browser can read it directly. Three routes:`),
+        h('div', { class: 'note' }, h('b', {}, 'A · Export from Navisworks. '), 'Navisworks Manage/Simulate: Output → Export Scene → FBX, then import the FBX here. SketchUp: File → Export → 3D Model → glTF/DAE/FBX. Revit: Export → FBX.'),
+        h('div', { class: 'note' }, h('b', {}, 'B · Automatic converter (private GitHub repo + Autodesk APS). '), 'Commit the file to ', h('span', { class: 'mono' }, 'models/incoming/'), ' (or run “Convert models” with a download link). Download the GLB from the run’s Artifacts and import it here. Keep company models in a private repository.'),
+        h('div', { class: 'note' }, h('b', {}, 'C · Ask the contractor. '), 'AVEVA E3D/PDMS, Tekla, SmartPlant: request FBX or GLB alongside the NWD.'),
         h('p', { class: 'mono dim', style: { margin: 0, fontSize: '12px' } }, 'Direct formats: GLB · glTF(+bin) · FBX · OBJ(+mtl) · DAE · STL · PLY')),
       actions: [{ label: 'OK', kind: 'primary' }],
     });

@@ -10,6 +10,8 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
 
+MeshoptDecoder.ready?.catch?.(() => {}); // strict CSP without wasm: only meshopt-compressed GLBs are affected
+
 export const OPEN_FORMATS = ['glb', 'gltf', 'fbx', 'obj', 'dae', 'stl', 'ply'];
 export const NATIVE_FORMATS = {
   nwd: 'Navisworks Document', nwc: 'Navisworks Cache', nwf: 'Navisworks File Set',
