@@ -22,7 +22,7 @@ const NATIVE = ['nwd', 'nwc', 'nwf', 'dwfx', 'dwf', 'skp', 'rvt', 'ifc', 'dwg', 
 const UNIT_MAP = { m: 'm', meter: 'm', meters: 'm', mm: 'mm', millimeter: 'mm', cm: 'cm', centimeter: 'cm', ft: 'ft', foot: 'ft', feet: 'ft', in: 'in', inch: 'in', 'decimal-ft': 'ft' };
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const slug = (s) => s.toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'model';
+export const slug = (s) => s.toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'model';
 
 // ---------- APS REST ----------
 async function getToken(id, secret) {
@@ -157,7 +157,7 @@ async function convert(src, outDir, opts) {
   return results;
 }
 
-async function updateIndex(outDir, entries) {
+export async function updateIndex(outDir, entries) {
   const idxPath = path.join(outDir, 'index.json');
   let idx = { models: [] };
   try { idx = JSON.parse(await fsp.readFile(idxPath, 'utf8')); } catch { /* new */ }

@@ -10,7 +10,7 @@ App review desain 3D untuk proyek fasilitas Oil & Gas: **plot plan 2D (PDF) → 
 | **Deliverable list** | Doc No, title, discipline, type, rev, **status** (Not started → IFR → IFA → IFC/AFC → As-built, On hold), **review code** A/B/C/D, **plan date & actual date**, PIC, remarks. Weighted progress (IFR 60%, IFA 80%, IFC/AFC 100%), overdue otomatis, filter, import CSV (`,` atau `;`, format tanggal dd/mm/yyyy OK), export **XLSX**. |
 | **Plot plan → 3D** | Upload PDF plot plan. Garis vektor (rect, circle, polygon, polyline) dibaca otomatis dari PDF CAD, tag equipment (mis. `T-101`) diambil dari teks di dalam outline. Tap outline → pilih kategori (tank, vessel, equipment, building, pipe rack, foundation, paving, bund wall, pit, pipe, fence, existing) → tinggi & elevasi. "Add all similar" untuk outline identik. PDF hasil scan? Trace manual pakai Rect / Circle / Polygon / Line. **Calibrate** skala dari dimensi yang diketahui. |
 | **Motion** | Build-up sinematik: blueprint neon → scan beam → objek naik dari tanah sesuai urutan konstruksi → kamera dari plan view ke orbit. Plus 360° orbit dan fly-through viewpoint. **Record ke video** (MP4/WebM). |
-| **Convert NWD / DWFx / SKP** | Langsung dari app: upload → GitHub Actions + Autodesk APS di repo private kamu → GLB otomatis masuk ke 3D Review. |
+| **Convert NWD / DWFx / SKP** | Langsung dari app: upload → GitHub Actions di repo private kamu → GLB otomatis masuk ke 3D Review. NWD/NWC tanpa akun Autodesk. |
 | **3D Review** (ala Navisworks) | Federated model (plot plan + beberapa model kontraktor), model tree + search, properties (dimensi, E/N/Elev, volume, luas), **section box**, **measure** (jarak, H, V), **X-ray**, viewpoints + komentar, offset/rotasi/unit per layer. |
 | **Clash detective** | Hard, containment, dan clearance (mm). Selection A vs B per layer, status workflow (New → Active → Reviewed → Approved → Resolved), zoom ke clash, export **XLSX** clash report. |
 | **MTO** | Volume (m³), luas permukaan (m²), L×W×H, berat per material (density bisa diubah). Klasifikasi otomatis concrete/steel dari nama object, override per object. Flag mesh terbuka. Export **XLSX**. |
@@ -18,8 +18,8 @@ App review desain 3D untuk proyek fasilitas Oil & Gas: **plot plan 2D (PDF) → 
 ### Format file
 
 - **Langsung di app:** GLB, glTF (+bin/texture), FBX, OBJ (+MTL), DAE, STL, PLY.
-- **Lewat converter (GitHub Actions + Autodesk APS):** **NWD, NWC, DWFx, DWF, SKP**, RVT, IFC, DWG 3D.
-  Format ini closed/proprietary — tidak ada browser yang bisa membacanya langsung, jadi dikonversi ke GLB terkompresi dulu.
+- **Lewat converter (GitHub Actions):** **NWD, NWC** (tanpa Autodesk), **DWFx, DWF, SKP**, RVT, IFC, DWG 3D (via Autodesk APS).
+  Format ini closed/proprietary — tidak bisa dibaca langsung di browser, jadi dikonversi ke GLB terkompresi dulu.
 - Alternatif cepat: minta kontraktor export **FBX** (Navisworks: *Output → Export Scene → FBX*), SketchUp: *File → Export → 3D Model → glTF/DAE/FBX*.
 
 ## Jalankan lokal
@@ -48,27 +48,29 @@ Data (project, PDF, model) tersimpan **di device masing-masing** (IndexedDB, off
 
 ## Model kontraktor NWD / DWFx / SKP
 
-NWD adalah stream biner terkompresi milik Autodesk (`LcUStream`), tidak ada parser open-source — konversinya harus lewat Autodesk.
+Tombol **3D Review → Models → Convert NWD · DWFx · SKP** mengirim file ke repo GitHub **private** milikmu, dikonversi di server GitHub, lalu GLB-nya otomatis masuk ke 3D Review.
 
-**Jalur cepat (tanpa setup):** buka di Navisworks Manage/Simulate → *Output → Export Scene → FBX* → import FBX di app. (Navisworks Freedom tidak bisa export.) SketchUp: *File → Export → 3D Model → glTF/DAE/FBX*.
+| Format | Mesin konversi | Butuh akun Autodesk? |
+|---|---|---|
+| **.nwd, .nwc** | [nwd-reader](https://github.com/1817716374/nwd-reader) + `tools/nwd2glb` (C++, jalan di runner GitHub) | **Tidak** |
+| .dwfx, .dwf, .skp, .rvt, .ifc, .nwf | Autodesk APS Model Derivative + svf-utils | Ya (2 secret) |
 
-**Konversi langsung dari app (GitHub Actions + Autodesk APS):** tombol **3D Review → Models → Convert NWD · DWFx · SKP**.
+**Setup sekali** (panduan juga ada di dialog ⚙ di panel Models):
 
-Setup sekali (±10 menit), panduannya juga ada di dialog **Model converter** di app:
+1. Buat repo **PRIVATE** di <https://github.com/new> (mis. `nexus3d-converter`, centang *Add a README*). Model PHR/SKK Migas adalah dokumen perusahaan — **jangan** pakai repo publik.
+2. Buat **fine-grained token** (<https://github.com/settings/personal-access-tokens/new>) hanya untuk repo itu: *Contents: Read & write*, *Actions: Read*, *Workflows: Read & write*.
+3. Di app: isi repo + token → **Install converter** → **Save**. Selesai untuk NWD/NWC.
+4. *(Opsional, untuk DWFx/SKP/RVT/IFC)* <https://aps.autodesk.com/hubs> → Create application → **Traditional Web App** → callback = alamat app → API access *Data Management* + *Model Derivative* → simpan `APS_CLIENT_ID` dan `APS_CLIENT_SECRET` di repo → *Settings → Secrets and variables → Actions*.
 
-1. Autodesk: <https://aps.autodesk.com/hubs> → kalau diminta, buat **developer hub** dengan plan **Free** (checkout tetap minta metode pembayaran, tapi tidak ditagih selama di kuota Free) → **Applications → Create application** → tipe **Traditional Web App** (Server-to-Server juga bisa kalau muncul; keduanya mendukung token 2-legged yang dipakai converter) → *Callback URL*: alamat app, mis. `https://malegiw.github.io/3D-review/` (wajib diisi walau tidak dipakai) → *API access*: centang **Data Management** dan **Model Derivative** → catat **Client ID** & **Client Secret** (secret hanya tampil sekali).
-2. GitHub: buat repo **PRIVATE** (mis. `nexus3d-converter`, centang *Add a README*). Model PHR/SKK Migas adalah dokumen perusahaan — **jangan** pakai repo publik.
-3. Buat **fine-grained token** (<https://github.com/settings/personal-access-tokens/new>) hanya untuk repo itu: *Contents: Read & write*, *Actions: Read*, *Workflows: Read & write* (opsional *Secrets: Read* agar app bisa cek langkah 5).
-4. Di app: isi repo + token → **Install converter** (app memasang workflow + script converter ke repo) → **Save**.
-5. Repo → **Settings → Secrets and variables → Actions** → tambah `APS_CLIENT_ID` dan `APS_CLIENT_SECRET`.
+Pemakaian: pilih file (≤ 75 MB) → upload ke `models/incoming/` → GitHub Actions mengonversi (build reader pertama kali ±3–5 menit, berikutnya ter-cache) → GLB di `converted/glb/` → app mengunduh dan menambahkannya otomatis. Konversi tetap jalan walau app ditutup.
 
-Pemakaian: pilih file .nwd/.dwfx/.skp/.rvt/.ifc (≤ 75 MB) → app meng-upload ke `models/incoming/` → GitHub Actions menerjemahkan via Autodesk → GLB tersimpan di `converted/glb/` (repo private) → app mengunduh dan menambahkannya ke 3D Review otomatis. Status tampil di panel Models; konversi tetap jalan walau app ditutup dan diambil saat app dibuka lagi. Token GitHub hanya tersimpan di device ini; secret Autodesk hanya ada di GitHub.
+Hasil uji: file FEED piping 9,6 MB → 14.349 objek, 1,66 juta segitiga, 244 × 28 × 170 m, GLB terkompresi 16 MB, waktu baca < 1 detik.
 
-File > 75 MB: di GitHub → **Actions → Convert models → Run workflow** → isi *direct download link*, lalu import GLB dari *Artifacts*.
+**Lisensi nwd-reader:** PolyForm Noncommercial 1.0.0 — gratis untuk penggunaan pribadi/non-komersial; penggunaan komersial (termasuk untuk pekerjaan perusahaan) memerlukan lisensi dari pembuatnya. Workflow mengunduh nwd-reader saat dijalankan; kodenya tidak disertakan di repo ini.
 
-Catatan: file diunggah ke bucket *transient* Autodesk (terhapus otomatis ±24 jam) — pastikan sesuai kebijakan data perusahaan. Opsi `PUBLISH_MODELS=true` (repository variable) menaruh GLB di `public/models` untuk GitHub Pages (**Models → From repository**) — hanya untuk model yang boleh publik.
+Alternatif tanpa converter: Navisworks Manage/Simulate → *Output → Export Scene → FBX* → import FBX langsung.
 
-Lokal juga bisa: `cd tools && npm ci && APS_CLIENT_ID=… APS_CLIENT_SECRET=… node aps-convert.mjs file.nwd --out ../converted`.
+Lokal: `NWD2GLB=/path/nwd2glb node tools/nwd-convert.mjs file.nwd --out converted` (build nwd-reader + `tools/nwd2glb` dengan CMake), atau `cd tools && APS_CLIENT_ID=… APS_CLIENT_SECRET=… node aps-convert.mjs file.dwfx --out ../converted`.
 
 ## Versi 1 file (offline)
 

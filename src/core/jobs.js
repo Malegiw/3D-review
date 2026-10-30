@@ -45,9 +45,11 @@ export async function removeJob(job) { await db.del('jobs', job.id); emit('nexus
 function failureMessage(steps) {
   const bad = steps.find((s) => s.conclusion === 'failure');
   if (!bad) return 'Conversion did not finish. Open the run on GitHub for the log.';
-  if (/credential/i.test(bad.name)) return 'Autodesk keys are missing in the repo: add APS_CLIENT_ID and APS_CLIENT_SECRET under Settings → Secrets → Actions, then press Retry after re-running the job on GitHub.';
+  if (/credential/i.test(bad.name)) return 'This format (DWFx/SKP/RVT/IFC/NWF) needs Autodesk keys: add APS_CLIENT_ID and APS_CLIENT_SECRET under Settings → Secrets → Actions, re-run the job on GitHub, then press Retry. NWD and NWC files don’t need them.';
+  if (/install nwd reader/i.test(bad.name)) return 'Building the NWD reader failed on GitHub. Re-run the job; if it repeats, open the run log.';
+  if (/convert nwd/i.test(bad.name)) return 'The NWD reader could not read this file (possibly a newer Navisworks version). Open the run log, or export FBX from Navisworks.';
   if (/install/i.test(bad.name)) return 'Installing the converter failed on GitHub. Re-run the job.';
-  if (/convert/i.test(bad.name)) return 'Autodesk could not translate this file (see the run log). Check the APS keys and that the file opens in Navisworks.';
+  if (/autodesk/i.test(bad.name)) return 'Autodesk could not translate this file (see the run log). Check the APS keys and that the file opens in Navisworks/SketchUp.';
   return `Failed at “${bad.name}”. Open the run on GitHub for the log.`;
 }
 

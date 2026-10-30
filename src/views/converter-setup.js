@@ -28,7 +28,7 @@ export async function openConverterSetup() {
       status.replaceChildren(
         chip(c.private, c.private ? 'Private repo' : 'PUBLIC repo — use a private one'),
         chip(c.workflow, c.workflow ? 'Converter installed' : 'Converter not installed'),
-        chip(c.secrets, c.secrets === true ? 'Autodesk keys set' : c.secrets === false ? 'Autodesk keys missing' : 'Keys: cannot verify'),
+        chip(c.secrets === true ? true : null, c.secrets === true ? 'Autodesk keys set' : 'Autodesk keys: optional (DWFx/SKP)'),
       );
       return c;
     } catch (e) {
@@ -38,21 +38,20 @@ export async function openConverterSetup() {
   };
 
   const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
-    h('p', { class: 'dim2', style: { margin: 0 } }, 'Native Autodesk/SketchUp files are translated by Autodesk Platform Services inside your own private GitHub repository. The Autodesk secret stays in GitHub; this device only stores the repository name and a GitHub token.'),
+    h('p', { class: 'dim2', style: { margin: 0 } }, 'Conversions run in your own private GitHub repository. NWD and NWC files are read by an independent open-source reader on GitHub’s servers — no Autodesk account needed. DWFx, SKP, RVT and IFC additionally need free Autodesk keys. This device only stores the repository name and a GitHub token.'),
     h('ol', { style: { margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px', color: 'var(--fg-2)' } },
-      h('li', {}, 'Autodesk: ', A('https://aps.autodesk.com/hubs', 'aps.autodesk.com/hubs'), ' (create a developer hub on the Free plan if asked) → Applications → Create application → type ', h('b', {}, 'Traditional Web App'), ' (Server-to-Server also works if listed). Callback URL: this app’s address, e.g. ', h('span', { class: 'mono' }, location.origin + location.pathname), '. API access: tick ', h('b', {}, 'Data Management'), ' and ', h('b', {}, 'Model Derivative'), '. Copy Client ID and Client Secret (the secret is shown only once).'),
       h('li', {}, 'GitHub: ', A('https://github.com/new', 'github.com/new'), ' → name e.g. ', h('span', { class: 'mono' }, 'nexus3d-converter'), ', ', h('b', {}, 'Private'), ', tick “Add a README”.'),
-      h('li', {}, 'Token: ', A('https://github.com/settings/personal-access-tokens/new', 'fine-grained token'), ' → only that repository → permissions ', h('b', {}, 'Contents: Read & write, Actions: Read, Workflows: Read & write'), ' (Secrets: Read lets this page verify step 5).'),
-      h('li', {}, 'Paste repo and token below → ', h('b', {}, 'Install converter'), '.'),
-      h('li', {}, 'Add secrets ', h('span', { class: 'mono' }, 'APS_CLIENT_ID'), ' and ', h('span', { class: 'mono' }, 'APS_CLIENT_SECRET'), ' at ', secretsLink, '.')),
+      h('li', {}, 'Token: ', A('https://github.com/settings/personal-access-tokens/new', 'fine-grained token'), ' → only that repository → permissions ', h('b', {}, 'Contents: Read & write, Actions: Read, Workflows: Read & write'), '.'),
+      h('li', {}, 'Paste repo and token below → ', h('b', {}, 'Install converter'), ' → ', h('b', {}, 'Save'), '. NWD/NWC conversion works from here on.'),
+      h('li', {}, h('i', {}, 'Optional, for DWFx/SKP/RVT/IFC: '), A('https://aps.autodesk.com/hubs', 'aps.autodesk.com/hubs'), ' → Create application → ', h('b', {}, 'Traditional Web App'), ', callback ', h('span', { class: 'mono' }, location.origin + location.pathname), ', API access Data Management + Model Derivative → add secrets ', h('span', { class: 'mono' }, 'APS_CLIENT_ID'), ' and ', h('span', { class: 'mono' }, 'APS_CLIENT_SECRET'), ' at ', secretsLink, '.')),
     h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr' } },
       h('div', { class: 'field' }, h('label', { for: 'cv-repo' }, 'Private repository (owner/name)'), repoIn),
       h('div', { class: 'field' }, h('label', { for: 'cv-token' }, 'GitHub fine-grained token'), tokIn)),
     status,
-    h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'Files are sent to Autodesk’s transient storage (auto-deleted after about 24 h) for translation. Check that this fits your company’s data policy.'));
+    h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'NWD/NWC engine: nwd-reader by 1817716374 (PolyForm Noncommercial 1.0.0 — free for personal/non-commercial use; commercial use needs a licence from its author). Autodesk formats are sent to Autodesk’s transient storage (auto-deleted after ~24 h). Check both against your company’s policy.'));
 
   modal({
-    title: 'Model converter', eyebrow: 'AUTODESK APS · GITHUB', wide: true, body,
+    title: 'Model converter', eyebrow: 'NWD READER · AUTODESK APS · GITHUB', wide: true, body,
     actions: [
       { label: 'Check', icon: 'search', onClick: async () => { await check(); return false; } },
       { label: 'Install converter', icon: 'download', kind: 'mag', onClick: async (e) => {
