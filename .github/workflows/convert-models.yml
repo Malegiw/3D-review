@@ -1,0 +1,67 @@
+name: Convert models (NWD / DWFx / SKP → GLB)
+
+# Drop native files into models/incoming/ (≤ 100 MB each), or run this workflow manually with a direct
+# download link for bigger files. Needs repository secrets APS_CLIENT_ID and APS_CLIENT_SECRET
+# (free Autodesk Platform Services app: https://aps.autodesk.com).
+on:
+  push:
+    branches: [main]
+    paths: ['models/incoming/**']
+  workflow_dispatch:
+    inputs:
+      file_url:
+        description: 'Direct download link to a .nwd / .dwfx / .skp / .rvt / .ifc file (optional)'
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: convert-models
+  cancel-in-progress: false
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+      - name: Install converter
+        working-directory: tools
+        run: npm ci
+
+      - name: Convert with Autodesk APS
+        env:
+          APS_CLIENT_ID: ${{ secrets.APS_CLIENT_ID }}
+          APS_CLIENT_SECRET: ${{ secrets.APS_CLIENT_SECRET }}
+          FILE_URL: ${{ github.event.inputs.file_url }}
+        run: |
+          shopt -s nullglob nocaseglob
+          files=(models/incoming/*.{nwd,nwc,nwf,dwfx,dwf,skp,rvt,ifc,dwg})
+          if [ -n "$FILE_URL" ]; then files+=("$FILE_URL"); fi
+          if [ ${#files[@]} -eq 0 ]; then echo "Nothing to convert"; exit 0; fi
+          node tools/aps-convert.mjs "${files[@]}" --out public/models
+          mkdir -p models/converted
+          for f in models/incoming/*; do
+            [ -f "$f" ] && git mv "$f" models/converted/ || true
+          done
+          touch models/incoming/.gitkeep
+
+      - name: Commit GLB and redeploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "nexus3d-bot"
+          git config user.email "nexus3d-bot@users.noreply.github.com"
+          git add -A public/models models
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "Convert models to GLB"
+          git push
+          # pushes made with GITHUB_TOKEN don't trigger other workflows, so start the Pages deploy explicitly
+          gh workflow run deploy.yml --ref main

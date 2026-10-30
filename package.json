@@ -1,0 +1,28 @@
+{
+  "name": "nexus3d-review",
+  "version": "0.1.0",
+  "description": "NEXUS 3D Review by YMD — plot plan to 3D, model review, clash & MTO",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "test": "node --test test/*.test.mjs",
+    "sync:pdfjs": "rm -rf public/pdfjs && mkdir -p public/pdfjs && cp -r node_modules/pdfjs-dist/standard_fonts node_modules/pdfjs-dist/wasm public/pdfjs/"
+  },
+  "author": "Yan Malegi Diardi",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@fontsource/orbitron": "^5.3.0",
+    "@fontsource/rajdhani": "^5.3.0",
+    "@fontsource/share-tech-mono": "^5.3.0",
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^6.4.299",
+    "three": "^0.186.1",
+    "three-mesh-bvh": "^0.9.17"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  },
+  "private": true,
+  "type": "module"
+}
