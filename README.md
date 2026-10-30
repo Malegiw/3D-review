@@ -10,6 +10,7 @@ App review desain 3D untuk proyek fasilitas Oil & Gas: **plot plan 2D (PDF) → 
 | **Deliverable list** | Doc No, title, discipline, type, rev, **status** (Not started → IFR → IFA → IFC/AFC → As-built, On hold), **review code** A/B/C/D, **plan date & actual date**, PIC, remarks. Weighted progress (IFR 60%, IFA 80%, IFC/AFC 100%), overdue otomatis, filter, import CSV (`,` atau `;`, format tanggal dd/mm/yyyy OK), export **XLSX**. |
 | **Plot plan → 3D** | Upload PDF plot plan. Garis vektor (rect, circle, polygon, polyline) dibaca otomatis dari PDF CAD, tag equipment (mis. `T-101`) diambil dari teks di dalam outline. Tap outline → pilih kategori (tank, vessel, equipment, building, pipe rack, foundation, paving, bund wall, pit, pipe, fence, existing) → tinggi & elevasi. "Add all similar" untuk outline identik. PDF hasil scan? Trace manual pakai Rect / Circle / Polygon / Line. **Calibrate** skala dari dimensi yang diketahui. |
 | **Motion** | Build-up sinematik: blueprint neon → scan beam → objek naik dari tanah sesuai urutan konstruksi → kamera dari plan view ke orbit. Plus 360° orbit dan fly-through viewpoint. **Record ke video** (MP4/WebM). |
+| **Convert NWD / DWFx / SKP** | Langsung dari app: upload → GitHub Actions + Autodesk APS di repo private kamu → GLB otomatis masuk ke 3D Review. |
 | **3D Review** (ala Navisworks) | Federated model (plot plan + beberapa model kontraktor), model tree + search, properties (dimensi, E/N/Elev, volume, luas), **section box**, **measure** (jarak, H, V), **X-ray**, viewpoints + komentar, offset/rotasi/unit per layer. |
 | **Clash detective** | Hard, containment, dan clearance (mm). Selection A vs B per layer, status workflow (New → Active → Reviewed → Approved → Resolved), zoom ke clash, export **XLSX** clash report. |
 | **MTO** | Volume (m³), luas permukaan (m²), L×W×H, berat per material (density bisa diubah). Klasifikasi otomatis concrete/steel dari nama object, override per object. Flag mesh terbuka. Export **XLSX**. |
@@ -51,17 +52,21 @@ NWD adalah stream biner terkompresi milik Autodesk (`LcUStream`), tidak ada pars
 
 **Jalur cepat (tanpa setup):** buka di Navisworks Manage/Simulate → *Output → Export Scene → FBX* → import FBX di app. (Navisworks Freedom tidak bisa export.) SketchUp: *File → Export → 3D Model → glTF/DAE/FBX*.
 
-**Jalur otomatis (GitHub Actions + Autodesk APS):**
+**Konversi langsung dari app (GitHub Actions + Autodesk APS):** tombol **3D Review → Models → Convert NWD · DWFx · SKP**.
 
-1. Daftar gratis di <https://aps.autodesk.com> → buat **Application** (Traditional Web App / server-to-server) → catat **Client ID** & **Client Secret**. Model Derivative masuk kuota Free tier APS bulanan.
-2. Buat repo **PRIVATE** untuk konversi (mis. `nexus3d-converter`, isi sama dengan repo ini). Model PHR/SKK Migas adalah dokumen perusahaan — **jangan** taruh di repo publik.
-3. Repo → **Settings → Secrets and variables → Actions** → tambah `APS_CLIENT_ID` dan `APS_CLIENT_SECRET`.
-4. Konversi:
-   - File ≤ 100 MB: commit ke `models/incoming/`.
-   - File besar: **Actions → Convert models → Run workflow** → isi *direct download link*.
-5. Buka run tersebut → **Summary → Artifacts → nexus3d-glb** → download → di app: **3D Review → Models → Import model** (unit & up-axis terisi otomatis dari metadata).
+Setup sekali (±10 menit), panduannya juga ada di dialog **Model converter** di app:
 
-Catatan: file diunggah ke bucket *transient* Autodesk (terhapus otomatis ±24 jam) — pastikan sesuai kebijakan data perusahaan. Opsi `PUBLISH_MODELS=true` (repository variable) menaruh GLB di GitHub Pages dan menampilkannya di **Models → From repository** — hanya untuk model yang boleh publik.
+1. Autodesk: <https://aps.autodesk.com/myapps> → Create application → tipe **Server-to-Server** → catat **Client ID** & **Client Secret**. Model Derivative masuk kuota Free tier APS bulanan.
+2. GitHub: buat repo **PRIVATE** (mis. `nexus3d-converter`, centang *Add a README*). Model PHR/SKK Migas adalah dokumen perusahaan — **jangan** pakai repo publik.
+3. Buat **fine-grained token** (<https://github.com/settings/personal-access-tokens/new>) hanya untuk repo itu: *Contents: Read & write*, *Actions: Read*, *Workflows: Read & write* (opsional *Secrets: Read* agar app bisa cek langkah 5).
+4. Di app: isi repo + token → **Install converter** (app memasang workflow + script converter ke repo) → **Save**.
+5. Repo → **Settings → Secrets and variables → Actions** → tambah `APS_CLIENT_ID` dan `APS_CLIENT_SECRET`.
+
+Pemakaian: pilih file .nwd/.dwfx/.skp/.rvt/.ifc (≤ 75 MB) → app meng-upload ke `models/incoming/` → GitHub Actions menerjemahkan via Autodesk → GLB tersimpan di `converted/glb/` (repo private) → app mengunduh dan menambahkannya ke 3D Review otomatis. Status tampil di panel Models; konversi tetap jalan walau app ditutup dan diambil saat app dibuka lagi. Token GitHub hanya tersimpan di device ini; secret Autodesk hanya ada di GitHub.
+
+File > 75 MB: di GitHub → **Actions → Convert models → Run workflow** → isi *direct download link*, lalu import GLB dari *Artifacts*.
+
+Catatan: file diunggah ke bucket *transient* Autodesk (terhapus otomatis ±24 jam) — pastikan sesuai kebijakan data perusahaan. Opsi `PUBLISH_MODELS=true` (repository variable) menaruh GLB di `public/models` untuk GitHub Pages (**Models → From repository**) — hanya untuk model yang boleh publik.
 
 Lokal juga bisa: `cd tools && npm ci && APS_CLIENT_ID=… APS_CLIENT_SECRET=… node aps-convert.mjs file.nwd --out ../converted`.
 

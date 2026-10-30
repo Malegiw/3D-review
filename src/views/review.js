@@ -12,6 +12,8 @@ import { loadModelFiles, guessUnits, guessZUp, ACCEPT, NATIVE_FORMATS, ext } fro
 import { runClash } from '../engine/clash.js';
 import { runMTO } from '../engine/mto.js';
 import { playBuildUp, playOrbit, playTour } from '../engine/motion.js';
+import { NATIVE_EXT, getConverter, startConversion, projectJobs, retryJob, removeJob } from '../core/jobs.js';
+import { openConverterSetup } from './converter-setup.js';
 
 const STATUS = ['New', 'Active', 'Reviewed', 'Approved', 'Resolved'];
 const STATUS_C = { New: 'var(--red)', Active: 'var(--orange)', Reviewed: 'var(--cyan)', Approved: 'var(--violet)', Resolved: 'var(--green)' };
@@ -119,15 +121,17 @@ export async function renderReview(main, project) {
   async function importFiles() {
     const files = await pickFiles({ accept: ACCEPT, multiple: true });
     if (!files.length) return;
+    const natives = files.filter((f) => NATIVE_EXT.includes(ext(f.name)));
+    if (natives.length && natives.length === files.length) return convertFiles(natives);
     const recFiles = files.map((f) => ({ name: f.name, blob: f }));
-    const nat = files.find((f) => NATIVE_FORMATS[ext(f.name)]);
+    const nat = natives[0];
     let object, format;
     try {
       viewer.setHud('PARSING MODEL', files.map((f) => f.name).join(', '));
       ({ object, format } = await loadModelFiles(recFiles));
     } catch (e) {
       viewer.setHud('');
-      if (e.native || nat) return converterHelp(e.file || nat.name);
+      if (e.native || nat) return convertFiles(natives.length ? natives : null);
       return toast(e.message, 'err');
     }
     viewer.setHud('');
@@ -146,17 +150,30 @@ export async function renderReview(main, project) {
     toast(`${rec.name} added (${fmt.int(viewer.layers.get(rec.id).meshes.length)} objects).`, 'ok');
     renderPanel(); corner();
   }
+  async function convertFiles(list) {
+    const cfg = await getConverter();
+    if (!cfg?.repo || !cfg?.token) return converterHelp(list?.[0]?.name || 'model.nwd');
+    if (!list) list = await pickFiles({ accept: NATIVE_EXT.map((x) => `.${x}`).join(','), multiple: true });
+    if (!list?.length) return;
+    openPanel('layers');
+    for (const f of list) {
+      toast(`Uploading ${f.name} (${fmt.bytes(f.size)}) to the converter…`, 'info', 'CONVERTER');
+      try {
+        const job = await startConversion(project.id, f);
+        if (job.status === 'failed') toast(job.message, 'err', 'UPLOAD FAILED');
+        else toast(`${f.name} is converting on GitHub. It appears here automatically when ready — you can keep working.`, 'ok', 'CONVERTING');
+      } catch (e) { toast(e.message, 'err'); }
+    }
+  }
   function converterHelp(name) {
     const e = ext(name);
     modal({
-      title: `${NATIVE_FORMATS[e] || e.toUpperCase()} needs conversion`, eyebrow: 'NATIVE FORMAT', wide: true,
+      title: `${NATIVE_FORMATS[e] || e.toUpperCase()} needs the converter`, eyebrow: 'NATIVE FORMAT', wide: true,
       body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
-        h('p', { class: 'dim2', style: { margin: 0 } }, `.${e} is a closed Autodesk/Trimble format, so no browser can read it directly. Three routes:`),
-        h('div', { class: 'note' }, h('b', {}, 'A · Export from Navisworks. '), 'Navisworks Manage/Simulate: Output → Export Scene → FBX, then import the FBX here. SketchUp: File → Export → 3D Model → glTF/DAE/FBX. Revit: Export → FBX.'),
-        h('div', { class: 'note' }, h('b', {}, 'B · Automatic converter (private GitHub repo + Autodesk APS). '), 'Commit the file to ', h('span', { class: 'mono' }, 'models/incoming/'), ' (or run “Convert models” with a download link). Download the GLB from the run’s Artifacts and import it here. Keep company models in a private repository.'),
-        h('div', { class: 'note' }, h('b', {}, 'C · Ask the contractor. '), 'AVEVA E3D/PDMS, Tekla, SmartPlant: request FBX or GLB alongside the NWD.'),
+        h('p', { class: 'dim2', style: { margin: 0 } }, `.${e} is a closed Autodesk/Trimble format, so it is translated by Autodesk first. Set up the converter once (about 10 minutes), then NWD, NWC, DWFx, DWF, SKP, RVT and IFC files convert from this button and land in the 3D review automatically.`),
+        h('div', { class: 'note' }, h('b', {}, 'No setup? '), 'Navisworks Manage/Simulate: Output → Export Scene → FBX, then import the FBX here. SketchUp: File → Export → 3D Model → glTF/DAE/FBX.'),
         h('p', { class: 'mono dim', style: { margin: 0, fontSize: '12px' } }, 'Direct formats: GLB · glTF(+bin) · FBX · OBJ(+mtl) · DAE · STL · PLY')),
-      actions: [{ label: 'OK', kind: 'primary' }],
+      actions: [{ label: 'Later' }, { label: 'Set up converter', kind: 'primary', icon: 'gear', onClick: () => { setTimeout(openConverterSetup, 50); } }],
     });
   }
   async function fromRepo() {
@@ -207,7 +224,10 @@ export async function renderReview(main, project) {
     viewer.fit();
     toast('Layer moved so its centre sits at the plot plan origin. Fine-tune with the offsets.', 'ok');
   }
-  function pLayers() {
+  const JOB_C = { uploading: 'var(--cyan)', queued: 'var(--yellow)', running: 'var(--cyan)', downloading: 'var(--cyan)', done: 'var(--green)', failed: 'var(--red)' };
+  const ago = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h`; };
+  async function pLayers() {
+    const jobs = await projectJobs(project.id);
     const list = [...viewer.layers.values()];
     const tree = h('div', { class: 'tree' });
     const drawTree = (q = '') => {
@@ -219,7 +239,19 @@ export async function renderReview(main, project) {
       if (!all.length) tree.append(h('div', { class: 'mono dim', style: { padding: '8px 10px', fontSize: '11px' } }, 'No objects.'));
     };
     shell('Models', 'FEDERATED MODEL',
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn sm primary', onclick: importFiles }, icon('upload'), 'Import model'), h('button', { class: 'btn sm ghost', onclick: fromRepo }, icon('github'), 'From repository')),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'btn sm primary', onclick: importFiles }, icon('upload'), 'Import model'),
+        h('button', { class: 'btn sm mag', onclick: () => convertFiles(null) }, icon('zap'), 'Convert NWD · DWFx · SKP'),
+        h('button', { class: 'btn sm icon ghost', 'aria-label': 'Converter settings', title: 'Converter settings', onclick: openConverterSetup }, icon('gear')),
+        h('button', { class: 'btn sm ghost', onclick: fromRepo }, icon('github'), 'From repository')),
+      jobs.length ? h('div', { class: 'clist' }, h('div', { class: 'lbl' }, 'Conversions'), jobs.slice(0, 8).map((j) => h('div', { class: 'citem', style: { cursor: 'default', gridTemplateColumns: 'auto 1fr', borderColor: j.status === 'failed' ? 'var(--red)' : null } },
+        h('span', { class: `chip ${['done', 'failed'].includes(j.status) ? '' : 'dot'}`, style: { '--c': JOB_C[j.status] } }, j.status === 'running' || j.status === 'queued' ? 'converting' : j.status),
+        h('div', { class: 'nm' }, j.file,
+          h('small', { style: { whiteSpace: 'normal' } }, j.status === 'failed' ? j.message : j.status === 'done' ? `Added · ${fmt.bytes(j.sizeOut || 0)} GLB · ${ago(j.created)} ago` : `${j.step || '…'} · ${ago(j.created)}`),
+          h('div', { class: 'btn-row', style: { marginTop: '6px', gap: '6px' } },
+            j.runUrl ? h('a', { class: 'btn sm ghost', href: j.runUrl, target: '_blank', rel: 'noopener' }, 'GitHub run') : null,
+            j.status === 'failed' && j.sha ? h('button', { class: 'btn sm', onclick: () => retryJob(j) }, 'Retry') : null,
+            ['done', 'failed'].includes(j.status) ? h('button', { class: 'btn sm ghost', onclick: () => removeJob(j) }, 'Clear') : null))))) : null,
       list.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } }, list.map((L) => h('div', { class: 'layer' },
         h('button', { class: 'btn sm icon ghost', 'aria-label': L.visible ? 'Hide layer' : 'Show layer', onclick: async () => {
           viewer.setLayerVisible(L.id, !L.visible);
@@ -532,6 +564,21 @@ export async function renderReview(main, project) {
   viewer._fitted = true;
   corner();
   offs.push(viewer.on('layers', corner), viewer.on('mode', corner));
+  let jobsRaf = 0;
+  const onJobs = () => { cancelAnimationFrame(jobsRaf); jobsRaf = requestAnimationFrame(() => { if (panel === 'layers') pLayers(); }); };
+  const onModel = async (e) => {
+    if (e.detail?.projectId !== project.id) return;
+    await syncLayers();
+    const ids = e.detail.modelIds || [];
+    const meshes = ids.flatMap((id) => viewer.layers.get(id)?.meshes || []);
+    viewer.setHud('');
+    viewer.fit(meshes.length ? meshes : null);
+    if (panel === 'layers') pLayers();
+    corner();
+  };
+  window.addEventListener('nexus:jobs', onJobs);
+  window.addEventListener('nexus:model-added', onModel);
+  offs.push(() => window.removeEventListener('nexus:jobs', onJobs), () => window.removeEventListener('nexus:model-added', onModel));
 
   return () => {
     motion?.stop();

@@ -1,9 +1,10 @@
 name: Convert models (NWD / DWFx / SKP → GLB)
 
 # Company models are confidential: run this in a PRIVATE repository.
-# Input:  files committed to models/incoming/ (≤ 100 MB each), or "Run workflow" with a direct download link.
-# Output: GLB files as a downloadable workflow artifact (private to the repo) → import them in the app.
-#         Set repository variable PUBLISH_MODELS=true only if the GLBs may be served publicly on GitHub Pages.
+# Input:  files committed to models/incoming/ (the NEXUS app does this for you), or "Run workflow" with a direct link.
+# Output: GLB in converted/glb/ (+ index.json) inside this private repo — the NEXUS app downloads it automatically —
+#         and as a downloadable workflow artifact. Set repository variable PUBLISH_MODELS=true only if the GLBs may be
+#         served publicly on GitHub Pages (they then go to public/models/ instead).
 # Needs secrets APS_CLIENT_ID and APS_CLIENT_SECRET (free Autodesk Platform Services app: https://aps.autodesk.com).
 on:
   push:
@@ -33,32 +34,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check Autodesk credentials
-        id: creds
         env:
           ID: ${{ secrets.APS_CLIENT_ID }}
+          SECRET: ${{ secrets.APS_CLIENT_SECRET }}
         run: |
-          if [ -z "$ID" ]; then
-            echo "::warning::APS_CLIENT_ID / APS_CLIENT_SECRET not set. Add them in Settings → Secrets and variables → Actions, then run this workflow again (files stay in models/incoming)."
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$ID" ] || [ -z "$SECRET" ]; then
+            echo "::error::APS_CLIENT_ID / APS_CLIENT_SECRET are not set. Add them in Settings → Secrets and variables → Actions, then re-run this job (files stay in models/incoming)."
+            exit 1
           fi
 
       - uses: actions/setup-node@v4
-        if: steps.creds.outputs.ok == 'true'
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: tools/package-lock.json
 
       - name: Install converter
-        if: steps.creds.outputs.ok == 'true'
         working-directory: tools
-        run: npm ci
+        run: if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
 
       - name: Convert with Autodesk APS
         id: convert
-        if: steps.creds.outputs.ok == 'true'
         env:
           APS_CLIENT_ID: ${{ secrets.APS_CLIENT_ID }}
           APS_CLIENT_SECRET: ${{ secrets.APS_CLIENT_SECRET }}
@@ -68,13 +62,13 @@ jobs:
           files=(models/incoming/*.{nwd,nwc,nwf,dwfx,dwf,skp,rvt,ifc,dwg})
           if [ -n "$FILE_URL" ]; then files+=("$FILE_URL"); fi
           if [ ${#files[@]} -eq 0 ]; then echo "Nothing to convert"; echo "done=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          OUT=converted-glb
+          OUT=converted/glb
           if [ "$PUBLISH" = "true" ]; then OUT=public/models; fi
           node tools/aps-convert.mjs "${files[@]}" --out "$OUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
           echo "done=true" >> "$GITHUB_OUTPUT"
 
-      - name: Upload GLB (download from this run's Summary page)
+      - name: Upload GLB (also downloadable from this run's Summary page)
         if: steps.convert.outputs.done == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -82,20 +76,20 @@ jobs:
           path: ${{ steps.convert.outputs.out }}/*.glb
           retention-days: 14
 
-      - name: Archive processed inputs and commit
+      - name: Commit GLB and archive inputs
         if: steps.convert.outputs.done == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          OUT: ${{ steps.convert.outputs.out }}
         run: |
           mkdir -p models/converted
           for f in models/incoming/*; do [ -f "$f" ] && git mv "$f" models/converted/ || true; done
           touch models/incoming/.gitkeep
           git config user.name "nexus3d-bot"
           git config user.email "nexus3d-bot@users.noreply.github.com"
-          git add -A models
-          if [ "$PUBLISH" = "true" ]; then git add -A public/models; fi
+          git add -A models "$OUT"
           if git diff --cached --quiet; then echo "No changes"; exit 0; fi
           git commit -m "Convert models to GLB"
-          git push
+          for i in 1 2 3; do git pull --rebase --quiet && git push && break; sleep 5; done
           # pushes made with GITHUB_TOKEN don't trigger other workflows, so start the Pages deploy explicitly
-          if [ "$PUBLISH" = "true" ]; then gh workflow run deploy.yml --ref main; fi
+          if [ "$PUBLISH" = "true" ] && [ -f .github/workflows/deploy.yml ]; then gh workflow run deploy.yml --ref "${GITHUB_REF_NAME}"; fi

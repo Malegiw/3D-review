@@ -10,6 +10,7 @@ import './styles/theme.css';
 import { h, icon, logoMark, toast } from './core/ui.js';
 import { db, requestPersistence } from './core/db.js';
 import { seedSample } from './core/store.js';
+import { ensurePoller } from './core/jobs.js';
 import { renderHome } from './views/home.js';
 import { renderOverview, renderDocs } from './views/project.js';
 import { renderPlot } from './views/plotplan.js';
@@ -111,6 +112,7 @@ window.nexus = state; // handy for debugging from the browser console
   } catch (e) { console.warn('seed failed', e); }
   window.addEventListener('hashchange', route_);
   await route_();
+  ensurePoller(); // resume conversions that were running on GitHub while the app was closed
   setTimeout(() => document.querySelector('.logo-text')?.classList.add('run'), 900);
   if ('serviceWorker' in navigator && location.protocol === 'https:' && window.self === window.top) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});

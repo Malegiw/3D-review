@@ -1,19 +1,17 @@
 {
-  "name": "tools",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "nexus3d-converter",
+  "version": "0.2.0",
+  "private": true,
+  "description": "NEXUS 3D model converter: NWD / DWFx / SKP → GLB via Autodesk APS (Model Derivative) + svf-utils + gltf-transform",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "convert": "node aps-convert.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "@gltf-transform/core": "^4.5.1",
-    "@gltf-transform/extensions": "^4.5.1",
-    "@gltf-transform/functions": "^4.5.1",
-    "meshoptimizer": "^1.3.0",
-    "svf-utils": "^8.0.0"
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "meshoptimizer": "1.3.0",
+    "svf-utils": "8.0.0"
   }
 }
