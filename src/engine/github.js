@@ -1,5 +1,7 @@
 // GitHub REST client for the in-app converter (private repo + Actions + Autodesk APS).
 // The app never sees the Autodesk secret: it only uploads the native file and downloads the finished GLB.
+import { sealedBox, toB64, fromB64 } from '../core/crypto.js';
+
 const API = 'https://api.github.com';
 
 export const CONVERTER_WORKFLOW = '.github/workflows/convert-models.yml';
@@ -69,13 +71,21 @@ export class GitHubRepo {
     const r = await this.info();
     let workflow = false;
     try { await this.api(`/repos/${this.owner}/${this.name}/contents/${encPath(CONVERTER_WORKFLOW)}?ref=${encodeURIComponent(this.branch)}`); workflow = true; } catch (e) { if (e.status !== 404) throw e; }
-    let secrets = null; // null = cannot verify with this token
+    let secrets = null, encryptionKey = null; // null = cannot verify with this token
     try {
       const s = await this.api(`/repos/${this.owner}/${this.name}/actions/secrets`);
       const names = (s.secrets || []).map((x) => x.name);
       secrets = names.includes('APS_CLIENT_ID') && names.includes('APS_CLIENT_SECRET');
+      encryptionKey = names.includes('NEXUS_KEY');
     } catch { /* token without Secrets:read */ }
-    return { private: !!r.private, branch: this.branch, workflow, secrets, url: r.html_url };
+    return { private: !!r.private, branch: this.branch, workflow, secrets, encryptionKey, url: r.html_url };
+  }
+
+  /** Create/replace an Actions secret (value sealed with the repository public key, as GitHub requires). */
+  async setSecret(name, value) {
+    const pk = await this.api(`/repos/${this.owner}/${this.name}/actions/secrets/public-key`);
+    const sealed = sealedBox(new TextEncoder().encode(value), fromB64(pk.key));
+    await this.api(`/repos/${this.owner}/${this.name}/actions/secrets/${encodeURIComponent(name)}`, { method: 'PUT', body: { encrypted_value: toB64(sealed), key_id: pk.key_id } });
   }
 
   async fileSha(path) {
@@ -103,7 +113,7 @@ export class GitHubRepo {
 
   /** Commit a native model into models/incoming/ → triggers the convert workflow. Returns the commit SHA. */
   async uploadModel(blob, fileName) {
-    if (blob.size > MAX_UPLOAD) throw new Error(`File is ${(blob.size / 1048576).toFixed(0)} MB — the in-app upload limit is ${MAX_UPLOAD / 1048576} MB. Use “Run workflow” with a download link on GitHub instead.`);
+    if (blob.size > MAX_UPLOAD + 64) throw new Error(`File is ${(blob.size / 1048576).toFixed(0)} MB — the in-app upload limit is ${MAX_UPLOAD / 1048576} MB. Use “Run workflow” with a download link on GitHub instead.`);
     const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
     return this.putFile(`models/incoming/${fileName}`, b64, `Convert ${fileName}`);
   }

@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pack, updateIndex, slug } from './aps-convert.mjs';
 
+const quiet = !!process.env.NEXUS_QUIET; // public repo: keep model details out of the (public) Actions log
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
 const args = process.argv.slice(2);
 const flag = (f) => { const i = args.indexOf(f); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v; };
@@ -28,16 +29,16 @@ for (const src of args) {
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'nwd-'));
   const raw = path.join(tmp, 'raw.glb');
   try {
-    log(`${name} · ${(fs.statSync(src).size / 1048576).toFixed(1)} MB`);
+    if (!quiet) log(`${name} · ${(fs.statSync(src).size / 1048576).toFixed(1)} MB`);
     const report = JSON.parse(execFileSync(bin, [src, raw], { encoding: 'utf8', maxBuffer: 1 << 26 }).trim().split('\n').pop());
-    log(`  read ${report.objects} objects, ${report.triangles} triangles, ${report.sizeMetres.map((v) => v.toFixed(1)).join(' × ')} m`);
+    if (!quiet) log(`  read ${report.objects} objects, ${report.triangles} triangles, ${report.sizeMetres.map((v) => v.toFixed(1)).join(' × ')} m`);
     const file = `${slug(name)}.glb`;
     const size = await pack(raw, path.join(outDir, file), { compress });
-    log(`  → ${file} (${(size / 1048576).toFixed(1)} MB)`);
+    log(quiet ? '  converted 1 model' : `  → ${file} (${(size / 1048576).toFixed(1)} MB)`);
     entries.push({ name: name.replace(/^\d{10,}-/, '').replace(/\.[^.]+$/, ''), file, source: name, size, units: 'm', zUp: !!report.zUp, origin: report.origin, objects: report.objects, engine: 'nwd-reader', converted: new Date().toISOString() });
   } catch (e) {
     failed++;
-    console.error(`ERROR ${name}: ${(e.stderr || e.message || e).toString().trim()}`);
+    console.error(`ERROR ${quiet ? 'model' : name}: ${(e.stderr || e.message || e).toString().trim()}`);
   } finally {
     await fsp.rm(tmp, { recursive: true, force: true });
   }

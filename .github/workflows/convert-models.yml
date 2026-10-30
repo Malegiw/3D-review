@@ -1,6 +1,7 @@
 name: Convert models (NWD / DWFx / SKP → GLB)
 
-# Company models are confidential: run this in a PRIVATE repository.
+# Company models are confidential. In a PUBLIC repository the NEXUS app encrypts every upload (AES-256-GCM, *.nxe)
+# with the key stored as secret NEXUS_KEY; results are encrypted the same way before they are committed.
 # Input:  files committed to models/incoming/ (the NEXUS app does this for you), or "Run workflow" with a direct link.
 # Engines:
 #   .nwd .nwc  → nwd-reader + nwd2glb, runs entirely on the GitHub runner — no Autodesk account needed.
@@ -18,6 +19,10 @@ on:
       file_url:
         description: 'Direct download link to a .nwd / .nwc / .dwfx / .skp / .rvt / .ifc file (optional)'
         required: false
+      selftest:
+        description: 'Only build and check the NWD reader (no files needed)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -42,21 +47,42 @@ jobs:
         id: files
         env:
           FILE_URL: ${{ github.event.inputs.file_url }}
+          NEXUS_KEY: ${{ secrets.NEXUS_KEY }}
+          IS_PRIVATE: ${{ github.event.repository.private }}
         run: |
-          mkdir -p models/incoming "$RUNNER_TEMP/dl"
+          mkdir -p models/incoming "$RUNNER_TEMP/dl" "$RUNNER_TEMP/dec"
+          ENC=false; [ -n "$NEXUS_KEY" ] && ENC=true
+          shopt -s nullglob nocaseglob
+          plain=(models/incoming/*.{nwd,nwc,nwf,dwfx,dwf,skp,rvt,ifc,dwg})
+          if [ "$IS_PRIVATE" != "true" ] && [ ${#plain[@]} -gt 0 ]; then
+            echo "::error::Unencrypted model files were committed to this PUBLIC repository. Delete them and upload through the NEXUS app, which encrypts them."
+            exit 1
+          fi
+          nxe=(models/incoming/*.nxe)
+          if [ ${#nxe[@]} -gt 0 ]; then
+            if [ "$ENC" != "true" ]; then echo "::error::Encrypted uploads found but the NEXUS_KEY secret is missing."; exit 1; fi
+            node tools/nxe.mjs decrypt-dir models/incoming "$RUNNER_TEMP/dec"
+          fi
           # downloaded files stay outside the repo so they are never committed
           if [ -n "$FILE_URL" ]; then curl -fsSLJO --output-dir "$RUNNER_TEMP/dl" "$FILE_URL"; fi
-          shopt -s nullglob nocaseglob
-          nwd=(models/incoming/*.{nwd,nwc} "$RUNNER_TEMP"/dl/*.{nwd,nwc})
-          aps=(models/incoming/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg} "$RUNNER_TEMP"/dl/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg})
+          nwd=(models/incoming/*.{nwd,nwc} "$RUNNER_TEMP"/dl/*.{nwd,nwc} "$RUNNER_TEMP"/dec/*.{nwd,nwc})
+          aps=(models/incoming/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg} "$RUNNER_TEMP"/dl/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg} "$RUNNER_TEMP"/dec/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg})
+          if [ "$IS_PRIVATE" != "true" ] && [ "$ENC" != "true" ] && [ $(( ${#nwd[@]} + ${#aps[@]} )) -gt 0 ]; then
+            echo "::error::This repository is public: set up encryption in the NEXUS app (secret NEXUS_KEY) so results are not published in clear text."
+            exit 1
+          fi
           printf '%s\n' "${nwd[@]}" > "$RUNNER_TEMP/nwd.txt"
           printf '%s\n' "${aps[@]}" > "$RUNNER_TEMP/aps.txt"
-          OUT=converted/glb
-          if [ "$PUBLISH" = "true" ]; then OUT=public/models; fi
+          FINAL=converted/glb
+          if [ "$PUBLISH" = "true" ] && [ "$ENC" != "true" ]; then FINAL=public/models; fi
+          OUT="$FINAL"
+          if [ "$ENC" = "true" ]; then OUT="$RUNNER_TEMP/plain-out"; fi
           echo "nwd=${#nwd[@]}" >> "$GITHUB_OUTPUT"
           echo "aps=${#aps[@]}" >> "$GITHUB_OUTPUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
-          echo "NWD/NWC: ${#nwd[@]} · Autodesk formats: ${#aps[@]}"
+          echo "final=$FINAL" >> "$GITHUB_OUTPUT"
+          echo "enc=$ENC" >> "$GITHUB_OUTPUT"
+          echo "NWD/NWC: ${#nwd[@]} · Autodesk formats: ${#aps[@]} · encrypted: $ENC"
 
       - name: Check Autodesk credentials
         if: steps.files.outputs.aps != '0'
@@ -81,14 +107,14 @@ jobs:
 
       - name: Restore nwd-reader build
         id: nwdcache
-        if: steps.files.outputs.nwd != '0'
+        if: steps.files.outputs.nwd != '0' || inputs.selftest
         uses: actions/cache@v4
         with:
           path: ~/nwd-install
           key: nwd-reader-${{ env.NWD_READER_REF }}-${{ runner.os }}
 
       - name: Install NWD reader (nwd-reader, PolyForm Noncommercial)
-        if: steps.files.outputs.nwd != '0' && steps.nwdcache.outputs.cache-hit != 'true'
+        if: (steps.files.outputs.nwd != '0' || inputs.selftest) && steps.nwdcache.outputs.cache-hit != 'true'
         run: |
           git init -q "$RUNNER_TEMP/nwd-src" && cd "$RUNNER_TEMP/nwd-src"
           git remote add origin https://github.com/1817716374/nwd-reader
@@ -97,8 +123,18 @@ jobs:
           cmake --build build --config Release --parallel "$(nproc)"
           cmake --install build --config Release
 
+      - name: Self-test NWD reader
+        if: inputs.selftest
+        run: |
+          cmake -S tools/nwd2glb -B "$RUNNER_TEMP/n2g" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/nwd-install"
+          cmake --build "$RUNNER_TEMP/n2g" --parallel "$(nproc)"
+          set +e; "$RUNNER_TEMP/n2g/nwd2glb"; code=$?; set -e
+          [ "$code" = "2" ] && echo "nwd2glb built and runs (usage exit code 2) on $(lsb_release -ds), $(g++ --version | head -1)"
+
       - name: Convert NWD / NWC (no Autodesk)
         if: steps.files.outputs.nwd != '0'
+        env:
+          NEXUS_QUIET: ${{ steps.files.outputs.enc == 'true' && '1' || '' }}
         run: |
           cmake -S tools/nwd2glb -B "$RUNNER_TEMP/n2g" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/nwd-install"
           cmake --build "$RUNNER_TEMP/n2g" --parallel "$(nproc)"
@@ -114,8 +150,14 @@ jobs:
           mapfile -t files < "$RUNNER_TEMP/aps.txt"
           node tools/aps-convert.mjs "${files[@]}" --out "${{ steps.files.outputs.out }}"
 
+      - name: Encrypt results
+        if: steps.files.outputs.enc == 'true' && (steps.files.outputs.nwd != '0' || steps.files.outputs.aps != '0')
+        env:
+          NEXUS_KEY: ${{ secrets.NEXUS_KEY }}
+        run: node tools/nxe.mjs encrypt-out "${{ steps.files.outputs.out }}" "${{ steps.files.outputs.final }}"
+
       - name: Upload GLB (also downloadable from this run's Summary page)
-        if: steps.files.outputs.nwd != '0' || steps.files.outputs.aps != '0'
+        if: steps.files.outputs.enc != 'true' && (steps.files.outputs.nwd != '0' || steps.files.outputs.aps != '0')
         uses: actions/upload-artifact@v4
         with:
           name: nexus3d-glb
@@ -126,7 +168,7 @@ jobs:
         if: steps.files.outputs.nwd != '0' || steps.files.outputs.aps != '0'
         env:
           GH_TOKEN: ${{ github.token }}
-          OUT: ${{ steps.files.outputs.out }}
+          OUT: ${{ steps.files.outputs.final }}
         run: |
           mkdir -p models/converted
           for f in models/incoming/*; do [ -f "$f" ] && git mv -k "$f" models/converted/; done

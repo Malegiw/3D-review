@@ -203,18 +203,29 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
   }
   if (nodes.empty()) throw std::runtime_error("no triangle geometry found in the file");
 
+  // Always emit Y-up (glTF convention). Navisworks scenes are usually Z-up; DWF-derived ones may already be Y-up.
+  const double ext0[3] = {gmax[0] - gmin[0], gmax[1] - gmin[1], gmax[2] - gmin[2]};
+  const bool z_up = ext0[2] < ext0[1] * 0.5 && ext0[2] < ext0[0] * 0.5;  // flat in Z → Z is vertical
+  if (z_up) {
+    // R = rotation −90° about X: (x, y, z) → (x, z, −y), applied on the left of every node matrix
+    for (auto& n : nodes)
+      for (int c = 0; c < 4; ++c) {
+        double y = n.m[c * 4 + 1], z = n.m[c * 4 + 2];
+        n.m[c * 4 + 1] = z;
+        n.m[c * 4 + 2] = -y;
+      }
+    double y0 = gmin[1], y1 = gmax[1];
+    gmin[1] = gmin[2]; gmax[1] = gmax[2];
+    gmin[2] = -y1; gmax[2] = -y0;
+  }
+  const double ext[3] = {gmax[0] - gmin[0], gmax[1] - gmin[1], gmax[2] - gmin[2]};
   double origin[3];
   for (int k = 0; k < 3; ++k) origin[k] = std::floor((gmin[k] + gmax[k]) / 2.0);
-  // horizontal recentre only; keep true elevations (Y after axis check below)
-  // Navisworks/DWF models exported from Plant 3D are already Y-up when the vertical extent sits in Y.
-  const double ext[3] = {gmax[0] - gmin[0], gmax[1] - gmin[1], gmax[2] - gmin[2]};
-  const bool z_up = ext[2] < ext[1] * 0.5 && ext[2] < ext[0] * 0.5;  // flat in Z → Z is vertical
-  const int up = z_up ? 2 : 1;
-  origin[up] = 0;
+  origin[1] = 0;  // recentre horizontally only; keep true elevations
 
   std::ostringstream js;
   js << "{\"asset\":{\"version\":\"2.0\",\"generator\":\"NEXUS nwd2glb (nwd-reader)\",\"extras\":{\"nexus\":{\"source\":\""
-     << json_escape(input.filename().string()) << "\",\"units\":\"m\",\"zUp\":" << (z_up ? "true" : "false")
+     << json_escape(input.filename().string()) << "\",\"units\":\"m\",\"zUp\":false,\"sourceZUp\":" << (z_up ? "true" : "false")
      << ",\"origin\":[" << num(origin[0]) << "," << num(origin[1]) << "," << num(origin[2]) << "],\"triangles\":" << triangles
      << ",\"objects\":" << nodes.size() << "}}},";
   js << "\"scene\":0,\"scenes\":[{\"nodes\":[";
@@ -264,7 +275,7 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
 
   std::cout << "{\"objects\":" << nodes.size() << ",\"meshes\":" << meshes.size() << ",\"materials\":" << materials.size()
             << ",\"triangles\":" << triangles << ",\"skippedLines\":" << skipped_lines << ",\"skippedOther\":" << skipped_other
-            << ",\"zUp\":" << (z_up ? "true" : "false") << ",\"origin\":[" << num(origin[0]) << "," << num(origin[1]) << "," << num(origin[2]) << "]"
+            << ",\"zUp\":false,\"sourceZUp\":" << (z_up ? "true" : "false") << ",\"origin\":[" << num(origin[0]) << "," << num(origin[1]) << "," << num(origin[2]) << "]"
             << ",\"sizeMetres\":[" << num(ext[0]) << "," << num(ext[1]) << "," << num(ext[2]) << "]}\n";
   return 0;
 }

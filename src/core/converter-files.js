@@ -5,11 +5,13 @@ import nwdConverter from '../../tools/nwd-convert.mjs?raw';
 import nwd2glb from '../../tools/nwd2glb/nwd2glb.cpp?raw';
 import nwd2glbCmake from '../../tools/nwd2glb/CMakeLists.txt?raw';
 import pkg from '../../tools/package.json?raw';
+import nxe from '../../tools/nxe.mjs?raw';
 
 export const CONVERTER_FILES = [
   { path: 'tools/package.json', text: pkg },
   { path: 'tools/aps-convert.mjs', text: apsConverter },
   { path: 'tools/nwd-convert.mjs', text: nwdConverter },
+  { path: 'tools/nxe.mjs', text: nxe },
   { path: 'tools/nwd2glb/nwd2glb.cpp', text: nwd2glb },
   { path: 'tools/nwd2glb/CMakeLists.txt', text: nwd2glbCmake },
   { path: 'models/incoming/.gitkeep', text: '' },

@@ -4,6 +4,7 @@ import { db } from './db.js';
 import { uid, toast } from './ui.js';
 import { state } from './app.js';
 import { GitHubRepo } from '../engine/github.js';
+import { encryptBlob, decryptBlob } from './crypto.js';
 
 export const NATIVE_EXT = ['nwd', 'nwc', 'nwf', 'dwfx', 'dwf', 'skp', 'rvt', 'ifc', 'dwg'];
 const ACTIVE = new Set(['uploading', 'queued', 'running', 'downloading']);
@@ -22,10 +23,17 @@ export async function projectJobs(projectId) { return (await db.byProject('jobs'
 export async function startConversion(projectId, file) {
   const gh = await repoClient();
   if (!gh) throw new Error('Set up the converter first.');
-  const uploadName = `${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_')}`;
-  const job = await save({ id: uid('j'), projectId, file: file.name, uploadName, size: file.size, status: 'uploading', step: 'Uploading to GitHub', created: Date.now() });
+  const cfg = await getConverter();
+  const ext = (file.name.split('.').pop() || 'nwd').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // public repo: random name + client-side AES-256-GCM, so neither the name nor the model is readable on GitHub
+  const encrypted = !!cfg?.encrypted;
+  const sourceName = encrypted ? `${Date.now()}-${crypto.getRandomValues(new Uint32Array(2)).join('')}.${ext}` : `${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_')}`;
+  const uploadName = encrypted ? `${sourceName}.nxe` : sourceName;
+  const job = await save({ id: uid('j'), projectId, file: file.name, uploadName, sourceName, encrypted, size: file.size, status: 'uploading', step: encrypted ? 'Encrypting and uploading' : 'Uploading to GitHub', created: Date.now() });
   try {
-    job.sha = await gh.uploadModel(file, uploadName);
+    if (encrypted && !cfg.key) throw new Error('Encryption key missing on this device — open converter settings.');
+    const payload = encrypted ? await encryptBlob(file, cfg.key) : file;
+    job.sha = await gh.uploadModel(payload, uploadName);
     Object.assign(job, { status: 'queued', step: 'Waiting for GitHub Actions to start', queuedAt: Date.now() });
   } catch (e) {
     Object.assign(job, { status: 'failed', message: e.message });
@@ -86,17 +94,21 @@ async function advance(gh, job) {
   }
   Object.assign(job, { status: 'downloading', step: 'Downloading GLB' });
   await save(job);
-  const outs = await gh.findOutputs(job.uploadName);
+  const outs = await gh.findOutputs(job.sourceName || job.uploadName);
   if (!outs.length) {
     Object.assign(job, { status: 'failed', message: 'The converter finished but produced no 3D model (2D-only file?).' });
     return save(job);
   }
   const ids = [];
-  for (const o of outs) {
-    const blob = await gh.download(o.path);
+  const cfg = await getConverter();
+  const base = job.file.replace(/\.[^.]+$/, '');
+  for (const [i, o] of outs.entries()) {
+    let blob = await gh.download(o.path);
+    const enc = o.encrypted || /\.nxe$/i.test(o.file);
+    if (enc) blob = await decryptBlob(blob, cfg?.key);
     const rec = {
-      id: uid('m'), projectId: job.projectId, name: o.name || job.file.replace(/\.[^.]+$/, ''), source: job.file,
-      files: [{ name: o.file, blob }], units: o.units || 'm', zUp: !!o.zUp,
+      id: uid('m'), projectId: job.projectId, name: enc || !o.name ? `${base}${outs.length > 1 ? ` (${i + 1})` : ''}` : o.name, source: job.file,
+      files: [{ name: enc ? o.file.replace(/\.nxe$/i, '') : o.file, blob }], units: o.units || 'm', zUp: !!o.zUp,
       transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now(),
     };
     await db.put('models', rec);
