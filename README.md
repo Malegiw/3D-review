@@ -56,7 +56,7 @@ NWD adalah stream biner terkompresi milik Autodesk (`LcUStream`), tidak ada pars
 
 Setup sekali (±10 menit), panduannya juga ada di dialog **Model converter** di app:
 
-1. Autodesk: <https://aps.autodesk.com/myapps> → Create application → tipe **Server-to-Server** → catat **Client ID** & **Client Secret**. Model Derivative masuk kuota Free tier APS bulanan.
+1. Autodesk: <https://aps.autodesk.com/hubs> → kalau diminta, buat **developer hub** dengan plan **Free** (checkout tetap minta metode pembayaran, tapi tidak ditagih selama di kuota Free) → **Applications → Create application** → tipe **Traditional Web App** (Server-to-Server juga bisa kalau muncul; keduanya mendukung token 2-legged yang dipakai converter) → *Callback URL*: alamat app, mis. `https://malegiw.github.io/3D-review/` (wajib diisi walau tidak dipakai) → *API access*: centang **Data Management** dan **Model Derivative** → catat **Client ID** & **Client Secret** (secret hanya tampil sekali).
 2. GitHub: buat repo **PRIVATE** (mis. `nexus3d-converter`, centang *Add a README*). Model PHR/SKK Migas adalah dokumen perusahaan — **jangan** pakai repo publik.
 3. Buat **fine-grained token** (<https://github.com/settings/personal-access-tokens/new>) hanya untuk repo itu: *Contents: Read & write*, *Actions: Read*, *Workflows: Read & write* (opsional *Secrets: Read* agar app bisa cek langkah 5).
 4. Di app: isi repo + token → **Install converter** (app memasang workflow + script converter ke repo) → **Save**.
