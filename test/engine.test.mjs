@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { computeBoundsTree } from 'three-mesh-bvh';
@@ -73,7 +75,10 @@ test('Sample: plot plan vs contractor model finds the designed clashes', async (
 test('XLSX writer produces a valid workbook; CSV parser handles ; and quotes', () => {
   const blobParts = buildXlsx([{ name: 'Deliverables', title: 'Test', columns: [{ header: 'Doc', key: 'a' }, { header: 'Qty', key: 'b', type: 'n' }], rows: [{ a: 'X & <Y>', b: 1.5 }, { a: 'Z', b: 2 }] }]);
   return blobParts.arrayBuffer().then((ab) => {
-    fs.writeFileSync('/tmp/claude-0/-home-claude/d7c1ba86-9efd-566d-9d73-f392438a43d5/scratchpad/t.xlsx', Buffer.from(ab));
+    const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nx-')), 't.xlsx');
+    fs.writeFileSync(out, Buffer.from(ab));
+    const head = fs.readFileSync(out).subarray(0, 2).toString();
+    assert.equal(head, 'PK', 'xlsx is a zip container');
     const rows = parseCSV('Doc No;Title;Status\n"A-01";"Pipe ""10in""";IFR\nB-02;Rack;IFC\n');
     assert.equal(rows.length, 2);
     assert.equal(rows[0].title, 'Pipe "10in"');
