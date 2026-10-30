@@ -1,4 +1,4 @@
-// GitHub REST client for the in-app converter (private repo + Actions + Autodesk APS).
+// GitHub REST client for the in-app converter (repo contents + Actions + Autodesk APS).
 // The app never sees the Autodesk secret: it only uploads the native file and downloads the finished GLB.
 import { sealedBox, toB64, fromB64 } from '../core/crypto.js';
 

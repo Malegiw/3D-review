@@ -10,7 +10,7 @@ App review desain 3D untuk proyek fasilitas Oil & Gas: **plot plan 2D (PDF) → 
 | **Deliverable list** | Doc No, title, discipline, type, rev, **status** (Not started → IFR → IFA → IFC/AFC → As-built, On hold), **review code** A/B/C/D, **plan date & actual date**, PIC, remarks. Weighted progress (IFR 60%, IFA 80%, IFC/AFC 100%), overdue otomatis, filter, import CSV (`,` atau `;`, format tanggal dd/mm/yyyy OK), export **XLSX**. |
 | **Plot plan → 3D** | Upload PDF plot plan. Garis vektor (rect, circle, polygon, polyline) dibaca otomatis dari PDF CAD, tag equipment (mis. `T-101`) diambil dari teks di dalam outline. Tap outline → pilih kategori (tank, vessel, equipment, building, pipe rack, foundation, paving, bund wall, pit, pipe, fence, existing) → tinggi & elevasi. "Add all similar" untuk outline identik. PDF hasil scan? Trace manual pakai Rect / Circle / Polygon / Line. **Calibrate** skala dari dimensi yang diketahui. |
 | **Motion** | Build-up sinematik: blueprint neon → scan beam → objek naik dari tanah sesuai urutan konstruksi → kamera dari plan view ke orbit. Plus 360° orbit dan fly-through viewpoint. **Record ke video** (MP4/WebM). |
-| **Convert NWD / DWFx / SKP** | Langsung dari app: upload → GitHub Actions di repo private kamu → GLB otomatis masuk ke 3D Review. NWD/NWC tanpa akun Autodesk. |
+| **Convert NWD / DWFx / SKP** | Langsung dari app: upload → GitHub Actions di repo GitHub kamu → GLB otomatis masuk ke 3D Review. NWD/NWC tanpa akun Autodesk. |
 | **3D Review** (ala Navisworks) | Federated model (plot plan + beberapa model kontraktor), model tree + search, properties (dimensi, E/N/Elev, volume, luas), **section box**, **measure** (jarak, H, V), **X-ray**, viewpoints + komentar, offset/rotasi/unit per layer. |
 | **Clash detective** | Hard, containment, dan clearance (mm). Selection A vs B per layer, status workflow (New → Active → Reviewed → Approved → Resolved), zoom ke clash, export **XLSX** clash report. |
 | **MTO** | Volume (m³), luas permukaan (m²), L×W×H, berat per material (density bisa diubah). Klasifikasi otomatis concrete/steel dari nama object, override per object. Flag mesh terbuka. Export **XLSX**. |
@@ -48,7 +48,7 @@ Data (project, PDF, model) tersimpan **di device masing-masing** (IndexedDB, off
 
 ## Model kontraktor NWD / DWFx / SKP
 
-Tombol **3D Review → Models → Convert NWD · DWFx · SKP** mengirim file ke repo GitHub **private** milikmu, dikonversi di server GitHub, lalu GLB-nya otomatis masuk ke 3D Review.
+Tombol **3D Review → Models → Convert NWD · DWFx · SKP** mengirim file ke repo GitHub milikmu (boleh repo yang sama dengan app ini), dikonversi di server GitHub, lalu GLB-nya otomatis masuk ke 3D Review.
 
 | Format | Mesin konversi | Butuh akun Autodesk? |
 |---|---|---|
@@ -57,7 +57,7 @@ Tombol **3D Review → Models → Convert NWD · DWFx · SKP** mengirim file ke 
 
 **Setup sekali** (panduan juga ada di dialog ⚙ di panel Models):
 
-1. Buat repo **PRIVATE** di <https://github.com/new> (mis. `nexus3d-converter`, centang *Add a README*). Model PHR/SKK Migas adalah dokumen perusahaan — **jangan** pakai repo publik.
+1. Pakai repo app ini (mis. `Malegiw/3D-review`) atau repo lain. Di repo **publik**, file NWD dan GLB bisa diunduh siapa pun — centang *Encrypt uploads* di dialog kalau perlu (token butuh *Secrets: Read & write*).
 2. Buat **fine-grained token** (<https://github.com/settings/personal-access-tokens/new>) hanya untuk repo itu: *Contents: Read & write*, *Actions: Read*, *Workflows: Read & write*.
 3. Di app: isi repo + token → **Install converter** → **Save**. Selesai untuk NWD/NWC.
 4. *(Opsional, untuk DWFx/SKP/RVT/IFC)* <https://aps.autodesk.com/hubs> → Create application → **Traditional Web App** → callback = alamat app → API access *Data Management* + *Model Derivative* → simpan `APS_CLIENT_ID` dan `APS_CLIENT_SECRET` di repo → *Settings → Secrets and variables → Actions*.

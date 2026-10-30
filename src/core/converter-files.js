@@ -1,4 +1,4 @@
-// Files the app installs into the user's private converter repository (bundled as text at build time).
+// Files the app installs into the user's converter repository (bundled as text at build time).
 import workflow from '../../.github/workflows/convert-models.yml?raw';
 import apsConverter from '../../tools/aps-convert.mjs?raw';
 import nwdConverter from '../../tools/nwd-convert.mjs?raw';

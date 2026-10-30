@@ -1,7 +1,8 @@
 name: Convert models (NWD / DWFx / SKP → GLB)
 
-# Company models are confidential. In a PUBLIC repository the NEXUS app encrypts every upload (AES-256-GCM, *.nxe)
-# with the key stored as secret NEXUS_KEY; results are encrypted the same way before they are committed.
+# Optional encryption: when the NEXUS app uploads *.nxe files (AES-256-GCM, key = secret NEXUS_KEY), they are
+# decrypted on the runner and the results are encrypted the same way before being committed.
+# Without encryption, files in a PUBLIC repository are downloadable by anyone.
 # Input:  files committed to models/incoming/ (the NEXUS app does this for you), or "Run workflow" with a direct link.
 # Engines:
 #   .nwd .nwc  → nwd-reader + nwd2glb, runs entirely on the GitHub runner — no Autodesk account needed.
@@ -51,25 +52,19 @@ jobs:
           IS_PRIVATE: ${{ github.event.repository.private }}
         run: |
           mkdir -p models/incoming "$RUNNER_TEMP/dl" "$RUNNER_TEMP/dec"
-          ENC=false; [ -n "$NEXUS_KEY" ] && ENC=true
           shopt -s nullglob nocaseglob
-          plain=(models/incoming/*.{nwd,nwc,nwf,dwfx,dwf,skp,rvt,ifc,dwg})
-          if [ "$IS_PRIVATE" != "true" ] && [ ${#plain[@]} -gt 0 ]; then
-            echo "::error::Unencrypted model files were committed to this PUBLIC repository. Delete them and upload through the NEXUS app, which encrypts them."
-            exit 1
-          fi
           nxe=(models/incoming/*.nxe)
+          ENC=false; [ ${#nxe[@]} -gt 0 ] && ENC=true
           if [ ${#nxe[@]} -gt 0 ]; then
-            if [ "$ENC" != "true" ]; then echo "::error::Encrypted uploads found but the NEXUS_KEY secret is missing."; exit 1; fi
+            if [ -z "$NEXUS_KEY" ]; then echo "::error::Encrypted uploads found but the NEXUS_KEY secret is missing."; exit 1; fi
             node tools/nxe.mjs decrypt-dir models/incoming "$RUNNER_TEMP/dec"
           fi
           # downloaded files stay outside the repo so they are never committed
           if [ -n "$FILE_URL" ]; then curl -fsSLJO --output-dir "$RUNNER_TEMP/dl" "$FILE_URL"; fi
           nwd=(models/incoming/*.{nwd,nwc} "$RUNNER_TEMP"/dl/*.{nwd,nwc} "$RUNNER_TEMP"/dec/*.{nwd,nwc})
           aps=(models/incoming/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg} "$RUNNER_TEMP"/dl/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg} "$RUNNER_TEMP"/dec/*.{nwf,dwfx,dwf,skp,rvt,ifc,dwg})
-          if [ "$IS_PRIVATE" != "true" ] && [ "$ENC" != "true" ] && [ $(( ${#nwd[@]} + ${#aps[@]} )) -gt 0 ]; then
-            echo "::error::This repository is public: set up encryption in the NEXUS app (secret NEXUS_KEY) so results are not published in clear text."
-            exit 1
+          if [ "$IS_PRIVATE" != "true" ] && [ ${#nxe[@]} -eq 0 ] && [ $(( ${#nwd[@]} + ${#aps[@]} )) -gt 0 ]; then
+            echo "::notice::Public repository without encryption: inputs and GLB results are publicly downloadable."
           fi
           printf '%s\n' "${nwd[@]}" > "$RUNNER_TEMP/nwd.txt"
           printf '%s\n' "${aps[@]}" > "$RUNNER_TEMP/aps.txt"
