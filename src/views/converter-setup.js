@@ -72,7 +72,12 @@ export async function openConverterSetup() {
       { label: 'Save', kind: 'primary', icon: 'check', onClick: async () => {
         const v = read();
         if (!v.repo || !v.token) { toast('Fill in repository and token.', 'warn'); return false; }
-        try { const gh = await repoClient(v); await gh.info(); await setConverter({ ...v, branch: gh.branch }); } catch (e) { toast(e.message, 'err'); return false; }
+        try {
+          const gh = await repoClient(v);
+          const info = await gh.info();
+          if (!info.private) { toast('This repository is public. Model files would be visible to everyone — use a separate private repository for the converter.', 'err', 'NOT SAVED'); return false; }
+          await setConverter({ ...v, branch: gh.branch });
+        } catch (e) { toast(e.message, 'err'); return false; }
         toast('Converter settings saved on this device.', 'ok');
         return true;
       } },
