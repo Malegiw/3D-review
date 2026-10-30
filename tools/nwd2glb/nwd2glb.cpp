@@ -51,7 +51,7 @@ std::string num(double v) {
 }
 
 struct MeshOut {
-  uint32_t pos_view = 0, idx_view = 0, vertex_count = 0, index_count = 0;
+  uint32_t pos_view = 0, idx_view = 0, nrm_view = UINT32_MAX, vertex_count = 0, index_count = 0;
   std::array<float, 3> mn{}, mx{};
   uint32_t material = 0;
 };
@@ -70,6 +70,60 @@ struct Bin {
   }
 };
 
+// E3D / PDMS / Plant 3D primitives are saved as analytic shapes; nwd-reader keeps their raw parameters:
+//   104 circle   : centre(3) u(3) v(3) radius         → filled disc in the u/v plane (cylinder end caps)
+//   105 cylinder : base(3) axis(3) u(3) v(3) radius   → open tube from base to base + axis
+// Layout checked against E3D exports: every cylinder has a +n cap at base + axis and a −n cap at base.
+bool analytic_mesh(const nwd::Geometry& g, double unit_m, std::vector<float>& pos, std::vector<float>& nrm, std::vector<uint32_t>& idx) {
+  const auto& p = g.parameters;
+  const bool disc = g.type == 104;
+  const int count = disc ? 10 : 13;
+  for (int i = 0; i < count; ++i)
+    if (!std::isfinite(p[i])) return false;
+  const double r = disc ? p[9] : p[12];
+  if (!(r > 0)) return false;
+  const int o = disc ? 3 : 6;
+  const double c[3] = {p[0], p[1], p[2]};
+  const double u[3] = {p[o], p[o + 1], p[o + 2]}, v[3] = {p[o + 3], p[o + 4], p[o + 5]};
+  const double a[3] = {disc ? 0.0 : p[3], disc ? 0.0 : p[4], disc ? 0.0 : p[5]};
+  auto len = [](const double* x) { return std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]); };
+  double n[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+  const double ln = len(n);
+  if (ln < 1e-12) return false;
+  for (auto& x : n) x /= ln;
+  if (!disc && len(a) < 1e-12) return false;
+  const double radius_m = r * std::sqrt(len(u) * len(v)) * unit_m;
+  const int seg = std::clamp(static_cast<int>(std::ceil(2 * 3.14159265358979 * radius_m / 0.06)), 12, 48);
+  auto push = [&](double x, double y, double z, double nx, double ny, double nz) {
+    const double l = std::sqrt(nx * nx + ny * ny + nz * nz);
+    if (l > 0) { nx /= l; ny /= l; nz /= l; }
+    pos.insert(pos.end(), {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
+    nrm.insert(nrm.end(), {static_cast<float>(nx), static_cast<float>(ny), static_cast<float>(nz)});
+  };
+  if (disc) {
+    push(c[0], c[1], c[2], n[0], n[1], n[2]);
+    for (int i = 0; i < seg; ++i) {
+      const double t = 2 * 3.14159265358979 * i / seg, cs = std::cos(t) * r, sn = std::sin(t) * r;
+      push(c[0] + cs * u[0] + sn * v[0], c[1] + cs * u[1] + sn * v[1], c[2] + cs * u[2] + sn * v[2], n[0], n[1], n[2]);
+    }
+    for (int i = 0; i < seg; ++i) idx.insert(idx.end(), {0u, static_cast<uint32_t>(1 + i), static_cast<uint32_t>(1 + (i + 1) % seg)});
+    return true;
+  }
+  const bool flip = a[0] * n[0] + a[1] * n[1] + a[2] * n[2] < 0;  // keep outward winding
+  for (int ring = 0; ring < 2; ++ring)
+    for (int i = 0; i < seg; ++i) {
+      const double t = 2 * 3.14159265358979 * i / seg, cs = std::cos(t), sn = std::sin(t);
+      const double d[3] = {cs * u[0] + sn * v[0], cs * u[1] + sn * v[1], cs * u[2] + sn * v[2]};
+      push(c[0] + r * d[0] + ring * a[0], c[1] + r * d[1] + ring * a[1], c[2] + r * d[2] + ring * a[2], d[0], d[1], d[2]);
+    }
+  for (int i = 0; i < seg; ++i) {
+    const uint32_t b0 = i, b1 = (i + 1) % seg, t0 = seg + b0, t1 = seg + b1;
+    if (flip) idx.insert(idx.end(), {b0, t1, b1, b0, t0, t1});
+    else idx.insert(idx.end(), {b0, b1, t1, b0, t1, t0});
+  }
+  return true;
+}
+
 int run(const std::filesystem::path& input, const std::filesystem::path& output) {
   nwd::Options options;
   options.threads = 0;  // automatic
@@ -83,7 +137,7 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
   struct NodeOut { std::string name, layer, klass; uint32_t mesh; std::array<double, 16> m; };
   std::vector<NodeOut> nodes;
   double gmin[3] = {1e300, 1e300, 1e300}, gmax[3] = {-1e300, -1e300, -1e300};
-  size_t skipped_lines = 0, skipped_other = 0, triangles = 0;
+  size_t skipped_lines = 0, skipped_other = 0, triangles = 0, cylinders = 0, discs = 0;
 
   for (const auto& model : scene.models) {
     const double scale = model.meters_per_unit > 0 ? model.meters_per_unit : 1.0;
@@ -121,6 +175,7 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
     };
 
     std::map<std::pair<uint32_t, uint32_t>, uint32_t> mesh_for;  // (geometry, material) → mesh
+    std::unordered_map<std::string, uint32_t> analytic_for;     // (parameters, type, material) → mesh
     for (const auto& inst : model.instances) {
       if (inst.geometry_reference == nwd::none) continue;
       const auto& gref = model.geometry_references.at(inst.geometry_reference);
@@ -128,7 +183,8 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
       const auto& g = model.geometries.at(gref.geometry);
       if (g.external) { ++skipped_other; continue; }
       if (g.type == 95) { ++skipped_lines; continue; }
-      if (g.type != 94) { ++skipped_other; continue; }
+      const bool is_analytic = g.type == 104 || g.type == 105;
+      if (g.type != 94 && !is_analytic) { ++skipped_other; continue; }
 
       // material
       std::array<float, 4> rgba{0.62f, 0.66f, 0.72f, 1.f};
@@ -144,44 +200,60 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
       auto [mit, fresh] = material_ids.try_emplace(key, static_cast<uint32_t>(materials.size()));
       if (fresh) materials.push_back(rgba);
 
+      // identical analytic shapes (same pipe size and length) share one mesh
+      std::string akey;
+      if (is_analytic) {
+        akey.assign(reinterpret_cast<const char*>(g.parameters.data()), sizeof(float) * g.parameters.size());
+        akey += static_cast<char>(g.type & 0xff);
+        akey.append(reinterpret_cast<const char*>(&mit->second), sizeof(uint32_t));
+      }
       auto mk = std::make_pair(static_cast<uint32_t>(gref.geometry), mit->second);
-      auto found = mesh_for.find(mk);
-      uint32_t mesh_index;
-      if (found == mesh_for.end()) {
-        auto tri = nwd::triangle_indices(g);
-        if (tri.empty()) { ++skipped_other; continue; }
-        // compact the used slots into a vertex array
-        std::unordered_map<uint32_t, uint32_t> remap;
-        std::vector<float> pos;
+      uint32_t mesh_index = UINT32_MAX;
+      if (is_analytic) {
+        if (auto f = analytic_for.find(akey); f != analytic_for.end()) mesh_index = f->second;
+      } else if (auto f = mesh_for.find(mk); f != mesh_for.end()) {
+        mesh_index = f->second;
+      }
+      if (mesh_index == UINT32_MAX) {
+        std::vector<float> pos, nrm;
         std::vector<uint32_t> idx;
-        idx.reserve(tri.size());
+        if (is_analytic) {
+          if (!analytic_mesh(g, scale, pos, nrm, idx)) { ++skipped_other; continue; }
+        } else {
+          auto tri = nwd::triangle_indices(g);
+          if (tri.empty()) { ++skipped_other; continue; }
+          // compact the used slots into a vertex array
+          std::unordered_map<uint32_t, uint32_t> remap;
+          idx.reserve(tri.size());
+          for (auto slot : tri) {
+            auto [it, inserted] = remap.try_emplace(slot, static_cast<uint32_t>(pos.size() / 3));
+            if (inserted) {
+              uint32_t ci = g.coordinate_indices[slot];
+              for (int k = 0; k < 3; ++k) pos.push_back(g.coordinates[ci * 3 + k]);
+            }
+            idx.push_back(it->second);
+          }
+        }
         MeshOut mo;
         mo.mn = {1e30f, 1e30f, 1e30f};
         mo.mx = {-1e30f, -1e30f, -1e30f};
-        for (auto slot : tri) {
-          auto [it, inserted] = remap.try_emplace(slot, static_cast<uint32_t>(pos.size() / 3));
-          if (inserted) {
-            uint32_t ci = g.coordinate_indices[slot];
-            for (int k = 0; k < 3; ++k) {
-              float v = g.coordinates[ci * 3 + k];
-              pos.push_back(v);
-              mo.mn[k] = std::min(mo.mn[k], v);
-              mo.mx[k] = std::max(mo.mx[k], v);
-            }
+        for (size_t q = 0; q < pos.size(); q += 3)
+          for (int k = 0; k < 3; ++k) {
+            mo.mn[k] = std::min(mo.mn[k], pos[q + k]);
+            mo.mx[k] = std::max(mo.mx[k], pos[q + k]);
           }
-          idx.push_back(it->second);
-        }
         mo.vertex_count = static_cast<uint32_t>(pos.size() / 3);
         mo.index_count = static_cast<uint32_t>(idx.size());
         mo.pos_view = bin.add(pos.data(), pos.size() * 4, 34962);
         mo.idx_view = bin.add(idx.data(), idx.size() * 4, 34963);
+        if (!nrm.empty()) mo.nrm_view = bin.add(nrm.data(), nrm.size() * 4, 34962);
         mo.material = mit->second;
         triangles += idx.size() / 3;
         mesh_index = static_cast<uint32_t>(meshes.size());
         meshes.push_back(mo);
-        mesh_for.emplace(mk, mesh_index);
+        if (is_analytic) analytic_for.emplace(akey, mesh_index);
+        else mesh_for.emplace(mk, mesh_index);
       } else {
-        mesh_index = found->second;
         triangles += meshes[mesh_index].index_count / 3;
       }
 
@@ -198,6 +270,8 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
           gmax[r] = std::max(gmax[r], v);
         }
       }
+      if (g.type == 105) ++cylinders;
+      else if (g.type == 104) ++discs;
       nodes.push_back({display(inst.path), layer_of(inst.path), klass(inst.path), mesh_index, w});
     }
   }
@@ -248,7 +322,12 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
                         num(mo.mx[1]) + "," + num(mo.mx[2]) + "]}");
     uint32_t a_idx = static_cast<uint32_t>(accessors.size());
     accessors.push_back("{\"bufferView\":" + std::to_string(mo.idx_view) + ",\"componentType\":5125,\"count\":" + std::to_string(mo.index_count) + ",\"type\":\"SCALAR\"}");
-    js << (i ? "," : "") << "{\"primitives\":[{\"attributes\":{\"POSITION\":" << a_pos << "},\"indices\":" << a_idx << ",\"material\":" << mo.material << "}]}";
+    std::string normal;
+    if (mo.nrm_view != UINT32_MAX) {
+      normal = ",\"NORMAL\":" + std::to_string(accessors.size());
+      accessors.push_back("{\"bufferView\":" + std::to_string(mo.nrm_view) + ",\"componentType\":5126,\"count\":" + std::to_string(mo.vertex_count) + ",\"type\":\"VEC3\"}");
+    }
+    js << (i ? "," : "") << "{\"primitives\":[{\"attributes\":{\"POSITION\":" << a_pos << normal << "},\"indices\":" << a_idx << ",\"material\":" << mo.material << "}]}";
   }
   js << "],\"materials\":[";
   for (size_t i = 0; i < materials.size(); ++i) {
@@ -274,7 +353,7 @@ int run(const std::filesystem::path& input, const std::filesystem::path& output)
   out.close();
 
   std::cout << "{\"objects\":" << nodes.size() << ",\"meshes\":" << meshes.size() << ",\"materials\":" << materials.size()
-            << ",\"triangles\":" << triangles << ",\"skippedLines\":" << skipped_lines << ",\"skippedOther\":" << skipped_other
+            << ",\"triangles\":" << triangles << ",\"cylinders\":" << cylinders << ",\"discs\":" << discs << ",\"skippedLines\":" << skipped_lines << ",\"skippedOther\":" << skipped_other
             << ",\"zUp\":false,\"sourceZUp\":" << (z_up ? "true" : "false") << ",\"origin\":[" << num(origin[0]) << "," << num(origin[1]) << "," << num(origin[2]) << "]"
             << ",\"sizeMetres\":[" << num(ext[0]) << "," << num(ext[1]) << "," << num(ext[2]) << "]}\n";
   return 0;

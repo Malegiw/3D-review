@@ -52,7 +52,7 @@ Tombol **3D Review → Models → Convert NWD · DWFx · SKP** mengirim file ke 
 
 | Format | Mesin konversi | Butuh akun Autodesk? |
 |---|---|---|
-| **.nwd, .nwc** | [nwd-reader](https://github.com/1817716374/nwd-reader) + `tools/nwd2glb` (C++, jalan di runner GitHub) | **Tidak** |
+| **.nwd, .nwc** | [nwd-reader](https://github.com/1817716374/nwd-reader) + `tools/nwd2glb` (C++, jalan di runner GitHub). Mesh + primitif silinder/lingkaran E3D/PDMS (pipa, kolom, tangki) | **Tidak** |
 | .dwfx, .dwf, .skp, .rvt, .ifc, .nwf | Autodesk APS Model Derivative + svf-utils | Ya (2 secret) |
 
 **Setup sekali** (panduan juga ada di dialog ⚙ di panel Models):
