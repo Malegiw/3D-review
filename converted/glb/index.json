@@ -4,7 +4,7 @@
       "name": "PHR-CTR.261_27102026",
       "file": "1793364840867-phr-ctr-261-27102026.glb",
       "source": "1793364840867-PHR-CTR.261_27102026.nwd",
-      "size": 12476748,
+      "size": 12461656,
       "units": "m",
       "zUp": false,
       "origin": [
@@ -14,8 +14,8 @@
       ],
       "objects": 16312,
       "engine": "nwd-reader",
-      "converted": "2026-10-30T13:08:41.469Z"
+      "converted": "2026-11-01T04:47:30.836Z"
     }
   ],
-  "updated": "2026-10-30T13:08:41.472Z"
+  "updated": "2026-11-01T04:47:30.839Z"
 }
