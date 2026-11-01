@@ -53,6 +53,7 @@ export async function loadModelFiles(files) {
       const l = new GLTFLoader(manager).setDRACOLoader(getDraco()).setMeshoptDecoder(MeshoptDecoder);
       const g = await l.loadAsync(mainUrl);
       object = g.scene;
+      object.userData.nexus = g.asset?.extras?.nexus || null; // converter metadata: removed origin, units
     } else if (e === 'fbx') {
       object = await new FBXLoader(manager).loadAsync(mainUrl);
     } else if (e === 'dae') {

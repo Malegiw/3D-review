@@ -1,5 +1,5 @@
 // Review 3D service worker — offline shell. Navigation: network-first; assets: cache-first (hashed names).
-const CACHE = 'review3d-v0.2.0';
+const CACHE = 'review3d-v0.3.0';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg'];
 
 self.addEventListener('install', (e) => {

@@ -93,7 +93,8 @@ bool analytic_mesh(const nwd::Geometry& g, double unit_m, std::vector<float>& po
   for (auto& x : n) x /= ln;
   if (!disc && len(a) < 1e-12) return false;
   const double radius_m = r * std::sqrt(len(u) * len(v)) * unit_m;
-  const int seg = std::clamp(static_cast<int>(std::ceil(2 * 3.14159265358979 * radius_m / 0.06)), 12, 48);
+  int seg = std::clamp(static_cast<int>(std::ceil(2 * 3.14159265358979 * radius_m / 0.06)), 12, 48);
+  seg += seg & 1;  // even, so the mirrored bottom cap (u = -u) lands on the same rim vertices as the tube
   auto push = [&](double x, double y, double z, double nx, double ny, double nz) {
     const double l = std::sqrt(nx * nx + ny * ny + nz * nz);
     if (l > 0) { nx /= l; ny /= l; nz /= l; }

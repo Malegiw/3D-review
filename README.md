@@ -6,7 +6,7 @@ App review desain 3D untuk proyek fasilitas Oil & Gas: **plot plan 2D (PDF) → 
 
 Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (WGSN 2026), oranye safety hi-vis sebagai satu-satunya warna aksi, font Archivo (lebar untuk judul), panel kaca di atas tampilan 3D.
 
-## Fitur v0.2
+## Fitur v0.3
 
 | Modul | Isi |
 |---|---|
@@ -15,9 +15,10 @@ Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (
 | **Plot plan → 3D** | Upload PDF plot plan. Garis vektor (rect, circle, polygon, polyline) dibaca otomatis dari PDF CAD, tag equipment (mis. `T-101`) diambil dari teks di dalam outline. Tap outline → pilih kategori (tank, vessel, equipment, building, pipe rack, foundation, paving, bund wall, pit, pipe, fence, existing) → tinggi & elevasi. "Add all similar" untuk outline identik. PDF hasil scan? Trace manual pakai Rect / Circle / Polygon / Line. **Calibrate** skala dari dimensi yang diketahui. |
 | **Motion** | Build-up sinematik: blueprint neon → scan beam → objek naik dari tanah sesuai urutan konstruksi → kamera dari plan view ke orbit. Plus 360° orbit dan fly-through viewpoint. **Record ke video** (MP4/WebM). |
 | **Convert NWD / DWFx / SKP** | Langsung dari app: upload → GitHub Actions di repo GitHub kamu → GLB otomatis masuk ke 3D Review. NWD/NWC tanpa akun Autodesk. |
-| **3D Review** (ala Navisworks) | Federated model (plot plan + beberapa model kontraktor), model tree + search, properties (dimensi, E/N/Elev, volume, luas), **section box**, **measure** (jarak, H, V), **X-ray**, viewpoints + komentar, offset/rotasi/unit per layer. |
-| **Clash detective** | Hard, containment, dan clearance (mm). Selection A vs B per layer, status workflow (New → Active → Reviewed → Approved → Resolved), zoom ke clash, export **XLSX** clash report. |
-| **MTO** | Volume (m³), luas permukaan (m²), L×W×H, berat per material (density bisa diubah). Klasifikasi otomatis concrete/steel dari nama object, override per object. Flag mesh terbuka. Export **XLSX**. |
+| **3D Review** (ala Navisworks) | Federated model (plot plan + beberapa model kontraktor). Model besar digambar per material (BatchedMesh) — 16 ribu objek = ±16 draw call, ringan di HP. Pilih per **Bagian / Komponen / Item** (pipa+tutup, branch, equipment), model tree bertingkat (layer → item → komponen) + cari tag/nomor line, properti dengan **koordinat site asli** (E/N/Elev, origin converter dikembalikan), sumber file, volume solid. **Section box**, **X-ray**, hide/isolate, viewpoints + komentar, offset/rotasi/unit per layer. |
+| **Measure** | Snap ke sudut ■ / tepi ▲ / permukaan ●, garis preview, jarak + H / V + ΔE / ΔN, mode **Titik** (koordinat E/N/Elev), mode **Terdekat** (jarak bersih antar dua objek), m / mm, hapus per ukuran, ekspor CSV. |
+| **Clash detective** | Hard (dengan toleransi mm: kontak/sentuhan diabaikan, tembus dilaporkan), containment, clearance. Bisa cek di dalam satu model; abaikan dalam satu item (branch/equipment); satu hasil per pasangan komponen. Status workflow, zoom ke clash, export **XLSX**. |
+| **MTO** | Per komponen: volume (m³) hanya untuk solid tertutup, luas (m²), berat per material. Equipment & pipa E3D (envelope pejal) = Other, baja = struktur, beton = pondasi/slab/bund. Override per komponen di Properti. Export **XLSX**. |
 
 ### Format file
 

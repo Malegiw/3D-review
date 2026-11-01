@@ -4,8 +4,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { h } from '../core/ui.js';
-import { meshVolumeArea } from './mto.js';
+import { groupVolumeArea } from './mto.js';
 import { view3d, getTheme } from '../core/theme.js';
+import { batchLayer, syncInstance, BATCH_MIN } from './batch.js';
+import { indexLayer, displayName, parseName, toSite } from './groups.js';
+import { MeasureTool } from './measure.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -15,6 +18,7 @@ const MAT_SEL = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0x00
 const MAT_A = new THREE.MeshStandardMaterial({ color: 0xff3b5c, emissive: 0xff1040, emissiveIntensity: 0.7, roughness: 0.4 });
 const MAT_B = new THREE.MeshStandardMaterial({ color: 0x3dff9a, emissive: 0x10c060, emissiveIntensity: 0.6, roughness: 0.4 });
 const MAT_XRAY = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.05, depthWrite: false });
+const MAT_PICK = new THREE.MeshStandardMaterial({ color: 0xf2621a, emissive: 0x8a2f00, emissiveIntensity: 0.6, roughness: 0.4, transparent: true, opacity: 0.85 });
 const MAT_DEFAULT = new THREE.MeshStandardMaterial({ color: 0x8fa3b8, metalness: 0.25, roughness: 0.65 });
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
@@ -71,22 +75,26 @@ export class Viewer {
     this.scene.add(this.grid);
 
     this.layers = new Map();
-    this.selected = null;
+    this.selected = null;     // primary mesh of the selection (kept for older callers)
+    this.selection = [];      // all meshes of the selected component / item
+    this.selSet = new Set();
+    this.selectRes = 'component'; // part | component | item
     this.mode = 'select';
     this.xray = false;
     this.overrides = new Map();
+    this.pickHi = new Set();
     this.labels = [];
-    this.measures = [];
-    this.pendingPt = null;
     this.tickers = new Set();
     this.listeners = {};
     this.section = { on: false, box: new THREE.Box3(), helper: null };
     this.clipPlanes = Array.from({ length: 6 }, () => new THREE.Plane());
     this.raycaster = new THREE.Raycaster();
+    this.raycaster.layers.enableAll(); // batched originals live on render layer 1
     this._dirty = true;
     this._force = 0;
     this._timer = new THREE.Timer();
 
+    this.measure = new MeasureTool(this);
     this._bindPointer();
     this._ro = new ResizeObserver(() => this.resize());
     this._ro.observe(this.host);
@@ -119,6 +127,7 @@ export class Viewer {
     this.sun.intensity = p.sun;
     this.scene.environmentIntensity = p.env;
     MAT_SEL.color.set(p.sel); MAT_SEL.emissive.set(p.selEmissive);
+    MAT_PICK.color.set(p.sel); MAT_PICK.emissive.set(p.selEmissive);
     MAT_XRAY.color.set(p.xray); MAT_XRAY.opacity = id === 'cloud' ? 0.08 : 0.05;
     this.scene.traverse((o) => {
       if (o.userData?.edge && o.material) { o.material.color.set(p.edge); o.material.opacity = p.edgeOpacity; }
@@ -136,8 +145,22 @@ export class Viewer {
     const w = this.host.clientWidth || 1, hh = this.host.clientHeight || 1;
     this.renderer.setSize(w, hh, false);
     this.camera.aspect = w / hh;
-    this.camera.updateProjectionMatrix();
+    this._applyInset();
     this.requestRender();
+  }
+  /** Keep the view centre in the part of the canvas not covered by panels (px from the right / bottom edge). */
+  setInset({ right = 0, bottom = 0 } = {}) {
+    this.inset = { right, bottom };
+    this._applyInset();
+    this.requestRender();
+    this.measure?.draw();
+  }
+  _applyInset() {
+    const w = this.host.clientWidth || 1, hh = this.host.clientHeight || 1;
+    const { right = 0, bottom = 0 } = this.inset || {};
+    if (right || bottom) this.camera.setViewOffset(w, hh, Math.round(right / 2), Math.round(bottom / 2), w, hh);
+    else this.camera.clearViewOffset();
+    this.camera.updateProjectionMatrix();
   }
 
   _loop(ts) {
@@ -184,9 +207,17 @@ export class Viewer {
       meshes.push(o);
       i++;
     });
-    const layer = { id, name, kind, wrap, inner, object, meshes, visible: true, units, zUp, transform: { dx: 0, dy: 0, dz: 0, rotY: 0, ...transform } };
+    const { comps, items } = indexLayer(id, meshes);
+    const layer = { id, name, kind, wrap, inner, object, meshes, comps, items, visible: true, units, zUp, origin: object.userData?.nexus?.origin || null, transform: { dx: 0, dy: 0, dz: 0, rotY: 0, ...transform } };
     this.layers.set(id, layer);
     this.applyLayerTransform(id);
+    if (kind === 'import') {
+      // static geometry: matrices only change through the layer wrapper
+      object.traverse((o) => { o.matrixAutoUpdate = false; });
+      if (meshes.length >= BATCH_MIN) {
+        try { layer.batch = batchLayer(inner, meshes); } catch (e) { console.warn('batching failed, drawing meshes individually', e); }
+      }
+    }
     this.emit('layers');
     this.requestRender();
     return layer;
@@ -208,18 +239,19 @@ export class Viewer {
   removeLayer(id) {
     const L = this.layers.get(id);
     if (!L) return;
-    if (this.selected && this.selected.userData.layerId === id) this.select(null);
+    if (this.selection.some((m) => m.userData.layerId === id)) this.select(null);
+    L.batch?.dispose();
     this.world.remove(L.wrap);
     L.wrap.traverse((o) => {
       if (o.geometry) { o.geometry.disposeBoundsTree?.(); o.geometry.dispose(); }
       const ms = Array.isArray(o.userData.baseMat || o.material) ? (o.userData.baseMat || o.material) : [o.userData.baseMat || o.material];
-      ms.forEach((m) => { if (m && m !== MAT_DEFAULT) { m.map?.dispose(); m.dispose?.(); } });
+      ms.forEach((m) => { if (m && m !== MAT_DEFAULT && m !== MAT_SEL && m !== MAT_A && m !== MAT_B && m !== MAT_XRAY && m !== MAT_PICK) { m.map?.dispose(); m.dispose?.(); } });
     });
     this.layers.delete(id);
     this.emit('layers');
     this.requestRender();
   }
-  clear() { [...this.layers.keys()].forEach((id) => this.removeLayer(id)); this.clearMeasures(); this.setSection(false); }
+  clear() { [...this.layers.keys()].forEach((id) => this.removeLayer(id)); this.measure?.clear(); this.setSection(false); }
 
   setLayerVisible(id, v) {
     const L = this.layers.get(id);
@@ -244,38 +276,93 @@ export class Viewer {
     return this.layers.get(id)?.meshes.find((m) => m.userData.key === key) || null;
   }
 
-  // ---------- materials / selection ----------
-  _mat(m) {
-    if (this.overrides.has(m)) return this.overrides.get(m);
-    if (m === this.selected) return MAT_SEL;
-    if (this.xray) return MAT_XRAY;
-    return m.userData.baseMat;
+  // ---------- grouping ----------
+  /** Meshes that form the component / item / part a mesh belongs to. */
+  groupOf(mesh, res = this.selectRes) {
+    if (!mesh) return [];
+    const L = this.layers.get(mesh.userData.layerId);
+    if (!L || res === 'part') return [mesh];
+    const g = res === 'item' ? L.items?.get(mesh.userData.item) : L.comps?.get(mesh.userData.comp);
+    return g ? g.meshes : [mesh];
   }
-  refresh(m) { if (m) m.material = this._mat(m); this.requestRender(); }
-  refreshAll() { for (const L of this.layers.values()) for (const m of L.meshes) m.material = this._mat(m); this.requestRender(); }
 
-  select(mesh) {
-    const prev = this.selected;
-    this.selected = mesh || null;
-    if (prev) this.refresh(prev);
-    if (mesh) this.refresh(mesh);
-    this.emit('select', mesh);
+  // ---------- materials / selection ----------
+  _look(m) {
+    const hi = this.overrides.get(m) || (this.pickHi.has(m) ? MAT_PICK : null) || (this.selSet.has(m) ? MAT_SEL : null);
+    if (m.userData._b) {
+      m.material = hi || m.userData.baseMat;
+      syncInstance(m, { highlighted: !!hi });
+    } else {
+      m.material = hi || (this.xray ? MAT_XRAY : m.userData.baseMat);
+    }
+  }
+  refresh(m) { if (m) this._look(m); this.requestRender(); }
+  refreshAll() {
+    for (const L of this.layers.values()) {
+      L.batch?.batches.forEach((b) => { b.material = this.xray ? MAT_XRAY : b.userData.baseMat; });
+      for (const m of L.meshes) this._look(m);
+    }
+    this.requestRender();
+  }
+
+  /** Select the component (default), item or part under a mesh; null clears. `add` extends the selection. */
+  select(mesh, { add = false, res } = {}) {
+    const group = mesh ? this.groupOf(mesh, res) : [];
+    this.selectMeshes(add ? [...new Set([...this.selection, ...group])] : group);
+  }
+  selectMeshes(list) {
+    const prev = this.selection;
+    this.selection = list.filter(Boolean);
+    this.selSet = new Set(this.selection);
+    for (const m of prev) this._look(m);
+    for (const m of this.selection) this._look(m);
+    this.selected = this.selection[0] || null;
+    this.requestRender();
+    this.emit('select', this.selected);
+  }
+  highlightPick(list) {
+    const prev = [...this.pickHi];
+    this.pickHi = new Set(list || []);
+    for (const m of prev) this._look(m);
+    for (const m of this.pickHi) this._look(m);
+    this.requestRender();
   }
   setXray(on) { this.xray = on; this.refreshAll(); }
   highlightPair(a, b) {
+    const prev = [...this.overrides.keys()];
     this.overrides.clear();
-    if (a) this.overrides.set(a, MAT_A);
-    if (b) this.overrides.set(b, MAT_B);
+    for (const m of [].concat(a || [])) this.overrides.set(m, MAT_A);
+    for (const m of [].concat(b || [])) this.overrides.set(m, MAT_B);
+    prev.forEach((m) => this._look(m));
     this.xray = true;
     this.refreshAll();
   }
-  clearHighlights() { this.overrides.clear(); this.xray = false; this.refreshAll(); this.clearLabels('clash'); }
+  clearHighlights() {
+    const prev = [...this.overrides.keys()];
+    this.overrides.clear();
+    prev.forEach((m) => this._look(m));
+    this.xray = false;
+    this.refreshAll();
+    this.clearLabels('clash');
+  }
+  setVisible(list, v) {
+    for (const m of list) { m.visible = v; this._look(m); }
+    if (!v && this.selection.some((m) => !m.visible)) this.selectMeshes(this.selection.filter((m) => m.visible));
+    this.requestRender();
+    this.emit('visibility');
+  }
   isolate(meshes) {
     const keep = new Set(meshes);
-    for (const L of this.layers.values()) for (const m of L.meshes) m.visible = keep.has(m);
+    for (const L of this.layers.values()) for (const m of L.meshes) { m.visible = keep.has(m); this._look(m); }
     this.requestRender();
+    this.emit('visibility');
   }
-  showAll() { for (const L of this.layers.values()) for (const m of L.meshes) m.visible = true; this.requestRender(); }
+  showAll() {
+    for (const L of this.layers.values()) for (const m of L.meshes) { if (!m.visible) { m.visible = true; this._look(m); } }
+    this.requestRender();
+    this.emit('visibility');
+  }
+  hiddenCount() { let n = 0; for (const L of this.layers.values()) for (const m of L.meshes) if (!m.visible) n++; return n; }
 
   // ---------- camera ----------
   boundsOf(objs) {
@@ -298,6 +385,18 @@ export class Viewer {
     this.camera.updateProjectionMatrix();
     this.animateTo(center.clone().add(d.multiplyScalar(dist)), center, dur);
     if (!objs) this.buildGrid(Math.max(size.x, size.z) * 1.6, box.min.y);
+  }
+  fitBox(box, { dur = 0.6 } = {}) {
+    if (box.isEmpty()) return;
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(size.length() / 2, 0.3);
+    const d = this.camera.position.clone().sub(this.controls.target).normalize();
+    if (!isFinite(d.x) || d.lengthSq() < 0.5) d.set(1, 0.8, 1).normalize();
+    const dist = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.05;
+    this.camera.near = Math.min(this.camera.near, Math.max(0.01, radius / 2000));
+    this.camera.updateProjectionMatrix();
+    return this.animateTo(center.clone().add(d.multiplyScalar(dist)), center, dur);
   }
   view(name) {
     const dirs = { top: new THREE.Vector3(0, 1, 0.0001), iso: new THREE.Vector3(1, 0.8, 1), front: new THREE.Vector3(0, 0.15, 1), right: new THREE.Vector3(1, 0.15, 0), back: new THREE.Vector3(0, 0.15, -1), left: new THREE.Vector3(-1, 0.15, 0) };
@@ -342,60 +441,40 @@ export class Viewer {
     let down = null;
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+    el.addEventListener('pointermove', (e) => { if (this.mode === 'measure' && !down) this.measure.onMove(e); });
+    el.addEventListener('pointerleave', () => { if (this.mode === 'measure') { this.measure.hover = null; this.measure.draw(); } });
     el.addEventListener('pointerup', (e) => {
       if (!down) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       const dt = performance.now() - down.t;
       down = null;
-      if (moved > 6 || dt > 600 || e.button > 0) return;
+      if (moved > 8 || dt > 650 || e.button > 0) return;
+      if (this.mode === 'measure') { this.measure.onTap(e); return; }
       const hit = this.pick(e.clientX, e.clientY);
-      if (this.mode === 'measure') { if (hit) this._measureClick(hit.point); return; }
-      this.select(hit ? hit.object : null);
+      this.select(hit ? hit.object : null, { add: e.shiftKey || e.ctrlKey || e.metaKey });
     });
-    el.addEventListener('dblclick', (e) => { const hit = this.pick(e.clientX, e.clientY); if (hit) this.fit(hit.object); });
+    el.addEventListener('dblclick', (e) => {
+      if (this.mode === 'measure') return;
+      const hit = this.pick(e.clientX, e.clientY);
+      if (hit) this.fit(this.groupOf(hit.object));
+    });
   }
   pick(cx, cy) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     this.raycaster.firstHitOnly = !this.section.on;
-    const hits = this.raycaster.intersectObjects(this.meshes().filter((m) => m.visible && m.parent?.visible !== false), false);
+    const hits = this.raycaster.intersectObjects(this.meshes(), false);
     const box = this.section.box;
     return hits.find((h) => !this.section.on || box.containsPoint(h.point)) || null;
   }
 
-  // ---------- measure ----------
-  setMode(mode) { this.mode = mode; if (mode !== 'measure') this.pendingPt = null; this.emit('mode', mode); }
-  _marker(p, color = this.palette.measure) {
-    const r = Math.max(0.05, (this.gridStep || 5) * 0.04);
-    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
-    m.position.copy(p); m.renderOrder = 999; m.userData.helper = true;
-    this.fx.add(m);
-    return m;
-  }
-  _measureClick(p) {
-    if (!this.pendingPt) { this.pendingPt = { p: p.clone(), m: this._marker(p) }; this.requestRender(); return; }
-    const a = this.pendingPt.p, b = p.clone();
-    const m2 = this._marker(b);
-    const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: this.palette.measure, depthTest: false }));
-    line.renderOrder = 998;
-    this.fx.add(line);
-    const d = a.distanceTo(b);
-    const dh = Math.hypot(b.x - a.x, b.z - a.z), dv = b.y - a.y;
-    const lab = this.addLabel(a.clone().lerp(b, 0.5), `${d.toFixed(3)} m  ·  H ${dh.toFixed(3)}  ·  V ${dv >= 0 ? '+' : ''}${dv.toFixed(3)}`, 'measure');
-    const rec = { a: a.toArray(), b: b.toArray(), d, dh, dv, objs: [this.pendingPt.m, m2, line], lab };
-    this.measures.push(rec);
-    this.pendingPt = null;
-    this.emit('measure', rec);
-    this.requestRender();
-  }
-  clearMeasures() {
-    for (const m of this.measures) { m.objs.forEach((o) => { this.fx.remove(o); o.geometry.dispose(); }); }
-    if (this.pendingPt) { this.fx.remove(this.pendingPt.m); this.pendingPt = null; }
-    this.measures = [];
-    this.clearLabels('measure');
-    this.emit('measure');
+  // ---------- modes ----------
+  setMode(mode) {
+    this.mode = mode;
+    this.measure.setActive(mode === 'measure');
+    this.renderer.domElement.style.cursor = mode === 'measure' ? 'crosshair' : '';
+    this.emit('mode', mode);
   }
 
   addLabel(pos, text, kind = 'info') {
@@ -410,6 +489,8 @@ export class Viewer {
     this.labels = this.labels.filter((l) => { if (!kind || l.kind === kind) { l.el.remove(); return false; } return true; });
   }
   _updateLabels() {
+    const M = this.measure;
+    if (M && (M.items.length || M.pending || M.hover || M.svg.firstChild)) M.draw();
     if (!this.labels.length) return;
     const w = this.host.clientWidth, hh = this.host.clientHeight;
     const v = new THREE.Vector3();
@@ -448,13 +529,25 @@ export class Viewer {
   }
 
   // ---------- info ----------
-  info(mesh) {
-    const box = new THREE.Box3().setFromObject(mesh);
+  /** Properties of a selection (one or more meshes forming a component / item). */
+  info(meshes) {
+    const list = [].concat(meshes).filter(Boolean);
+    const box = new THREE.Box3();
+    let tris = 0;
+    for (const m of list) { box.expandByObject(m); tris += (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3; }
     const size = box.getSize(new THREE.Vector3());
     const c = box.getCenter(new THREE.Vector3());
-    const va = meshVolumeArea(mesh);
-    const L = this.layers.get(mesh.userData.layerId);
-    return { name: mesh.name, layer: L?.name || '—', tag: mesh.userData.tag, cat: mesh.userData.cat, size, center: c, ...va, tris: (mesh.geometry.index ? mesh.geometry.index.count : mesh.geometry.attributes.position.count) / 3 };
+    const first = list[0];
+    const L = this.layers.get(first?.userData.layerId);
+    const va = groupVolumeArea(list);
+    const name = displayName(first);
+    const { type, owner } = parseName(name);
+    const bottom = toSite(new THREE.Vector3(c.x, box.min.y, c.z), L);
+    const top = toSite(new THREE.Vector3(c.x, box.max.y, c.z), L);
+    return {
+      name, type, owner, layer: L?.name || '—', source: first?.userData.layer || '', tag: first?.userData.tag, cat: first?.userData.cat,
+      parts: list.length, size, center: toSite(c, L), bottom, top, ...va, tris,
+    };
   }
 
   // ---------- HUD / capture ----------
@@ -499,6 +592,7 @@ export class Viewer {
 
   dispose() {
     window.removeEventListener('r3d:theme', this._onTheme);
+    this.measure?.clear();
     cancelAnimationFrame(this._raf);
     this._ro.disconnect();
     this.clear();

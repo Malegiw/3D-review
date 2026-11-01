@@ -21,6 +21,7 @@ const STATUS_C = { New: 'var(--red)', Active: 'var(--orange)', Reviewed: 'var(--
 
 export async function renderReview(main, project) {
   const viewer = state.viewer ||= new Viewer();
+  try { const r = localStorage.getItem('r3d-selres'); if (['part', 'component', 'item'].includes(r)) viewer.selectRes = r; } catch { /* storage blocked */ }
   const root = h('div', { class: 'v3' });
   main.append(root);
   viewer.mount(root);
@@ -106,12 +107,27 @@ export async function renderReview(main, project) {
     drawer.hidden = !id;
     if (id) renderPanel();
     corner();
+    updateInset();
   }
+  // keep the 3D view centred in the visible area next to / above the drawer
+  const updateInset = () => requestAnimationFrame(() => {
+    if (drawer.hidden) return viewer.setInset({});
+    const phone = window.innerWidth <= 760;
+    const r = drawer.getBoundingClientRect(), host = viewer.host.getBoundingClientRect();
+    if (phone) viewer.setInset({ bottom: Math.max(0, host.bottom - r.top) });
+    else viewer.setInset({ right: Math.max(0, host.right - r.left) });
+  });
+  const ro = new ResizeObserver(updateInset);
+  ro.observe(drawer);
+  offs.push(() => ro.disconnect());
   function shell(title, eyebrow, ...body) {
     drawer.innerHTML = '';
+    const toggle = () => { drawer.classList.toggle('min'); updateInset(); };
     drawer.append(
-      h('div', { class: 'drawer-head' }, h('div', {}, h('div', { class: 'eyebrow' }, eyebrow), h('h3', { style: { marginTop: '6px' } }, title)),
-        h('button', { class: 'btn sm icon ghost', 'aria-label': 'Close panel', onclick: () => openPanel(null) }, icon('x'))),
+      h('div', { class: 'drawer-head' },
+        h('button', { type: 'button', class: 'drawer-grip', 'aria-label': 'Collapse panel', onclick: toggle }),
+        h('div', { class: 'drawer-title', onclick: () => { if (window.innerWidth <= 760) toggle(); } }, h('div', { class: 'eyebrow' }, eyebrow), h('h3', { style: { marginTop: '6px' } }, title)),
+        h('button', { class: 'btn sm icon ghost', 'aria-label': 'Close panel', onclick: () => { drawer.classList.remove('min'); openPanel(null); } }, icon('x'))),
       h('div', { class: 'drawer-body' }, body));
   }
   function renderPanel() {
@@ -242,13 +258,39 @@ export async function renderReview(main, project) {
     const jobs = await projectJobs(project.id);
     const list = [...viewer.layers.values()];
     const tree = h('div', { class: 'tree' });
+    const open = (pLayers.open ||= new Set());
     const drawTree = (q = '') => {
       tree.innerHTML = '';
-      const ql = q.toLowerCase();
-      const all = viewer.meshes({ visibleOnly: false }).filter((m) => !ql || m.name.toLowerCase().includes(ql) || (m.userData.tag || '').toLowerCase().includes(ql));
-      all.slice(0, 300).forEach((m) => tree.append(h('button', { class: m === viewer.selected ? 'on' : '', onclick: () => { viewer.select(m); viewer.fit(m); } }, m.name)));
-      if (all.length > 300) tree.append(h('div', { class: 'mono dim', style: { padding: '8px 10px', fontSize: '11px' } }, `+${all.length - 300} more — refine the search`));
-      if (!all.length) tree.append(h('div', { class: 'mono dim', style: { padding: '8px 10px', fontSize: '11px' } }, 'No objects.'));
+      const ql = q.trim().toLowerCase();
+      const selComp = viewer.selected?.userData.comp, selItem = viewer.selected?.userData.item;
+      const pickGroup = (meshes) => { viewer.selectMeshes(meshes.filter((m) => m.visible)); viewer.fit(meshes); };
+      const row = (label, sub, meshes, cls = '', extra = null) => h('button', { class: `${cls}`, title: label, onclick: () => pickGroup(meshes) }, extra, h('span', { class: 'tn no-i18n' }, label), sub ? h('small', {}, sub) : null);
+      let shown = 0;
+      const LIMIT = 400;
+      for (const L of viewer.layers.values()) {
+        if (!L.items?.size) continue;
+        const items = [...L.items.values()];
+        if (ql) {
+          const hits = [];
+          for (const c of L.comps.values()) if (c.name.toLowerCase().includes(ql) || (c.owner || '').toLowerCase().includes(ql)) hits.push(c);
+          if (!hits.length) continue;
+          tree.append(h('div', { class: 'tree-h' }, h('span', { class: 'no-i18n' }, L.name), h('small', {}, fmt.int(hits.length))));
+          for (const c of hits.slice(0, Math.max(0, LIMIT - shown))) tree.append(row(c.owner ? c.name.slice(0, c.name.indexOf(' of ')) : c.name, c.owner || `${c.meshes.length} part${c.meshes.length > 1 ? 's' : ''}`, c.meshes, `hit ${c.key === selComp ? 'on' : ''}`));
+          shown += hits.length;
+          continue;
+        }
+        tree.append(h('div', { class: 'tree-h' }, h('span', { class: 'no-i18n' }, L.name), h('small', {}, `${fmt.int(items.length)} items`)));
+        items.sort((a, b) => a.name.localeCompare(b.name));
+        for (const it of items.slice(0, LIMIT)) {
+          const isOpen = open.has(it.key);
+          const multi = it.comps.size > 1;
+          tree.append(row(it.name, multi ? `${fmt.int(it.comps.size)} comp.` : null, it.meshes, `item ${it.key === selItem ? 'on' : ''}`,
+            multi ? h('i', { class: `tw ${isOpen ? 'open' : ''}`, onclick: (e) => { e.stopPropagation(); if (isOpen) open.delete(it.key); else open.add(it.key); drawTree(q); } }) : h('i', { class: 'tw none' })));
+          if (isOpen) for (const ck of it.comps) { const c = L.comps.get(ck); tree.append(row(c.name.replace(/ of .*$/, ''), `${c.meshes.length} part${c.meshes.length > 1 ? 's' : ''}`, c.meshes, `leaf ${ck === selComp ? 'on' : ''}`)); }
+        }
+        if (items.length > LIMIT) tree.append(h('div', { class: 'tree-more' }, `+${items.length - LIMIT} more — refine the search`));
+      }
+      if (!tree.childNodes.length) tree.append(h('div', { class: 'tree-more' }, 'No objects.'));
     };
     shell('Models', 'Federated model',
       h('div', { class: 'btn-row' },
@@ -278,47 +320,98 @@ export async function renderReview(main, project) {
             if (!await confirmDialog(`Remove ${L.name} from this project?`, { danger: true, okLabel: 'Remove' })) return;
             await db.del('models', L.id); viewer.removeLayer(L.id); pLayers(); corner();
           } }, icon('trash'))) : h('span', { class: 'chip', style: { '--c': 'var(--cyan)' } }, 'PDF')))) : h('p', { class: 'dim2', style: { margin: 0 } }, 'No layers yet. Generate a plot plan or import a contractor model.'),
-      h('div', { class: 'field' }, h('label', { for: 'tq' }, 'Find object'), h('input', { class: 'inp', id: 'tq', placeholder: 'Tag or name…', oninput: (e) => drawTree(e.target.value) })),
+      h('div', { class: 'field' }, h('label', { for: 'tq' }, 'Find object'), h('input', { class: 'inp', id: 'tq', type: 'search', placeholder: 'Tag, line number or name…', value: pLayers.q || '', oninput: (e) => { pLayers.q = e.target.value; drawTree(e.target.value); } })),
       tree);
-    drawTree();
+    drawTree(pLayers.q || '');
   }
 
   // ---------- Properties ----------
+  const RES = [['part', 'Part'], ['component', 'Component'], ['item', 'Item']];
+  const resSeg = () => h('div', { class: 'seg', role: 'group', 'aria-label': 'Selection level' }, RES.map(([k, l]) => h('button', { type: 'button', class: viewer.selectRes === k ? 'on' : '', onclick: () => {
+    viewer.selectRes = k;
+    try { localStorage.setItem('r3d-selres', k); } catch { /* storage blocked */ }
+    if (viewer.selected) viewer.select(viewer.selected); else renderPanel();
+  } }, l)));
   function pInfo() {
-    const m = viewer.selected;
-    if (!m) return shell('Properties', 'Selection', h('p', { class: 'dim2', style: { margin: 0 } }, 'Tap an object in the 3D view. Double-tap zooms to it.'));
-    const i = viewer.info(m);
-    const mtoMat = project.mtoMat?.[m.userData.key] || m.userData.material || guessMaterial(m.name, m.userData.cat);
-    shell(i.name, 'Properties',
+    const sel = viewer.selection;
+    const hidden = viewer.hiddenCount();
+    const showAllBtn = hidden ? h('button', { class: 'btn sm ghost', onclick: () => { viewer.showAll(); renderPanel(); } }, icon('eye'), `Show all (${fmt.int(hidden)} hidden)`) : null;
+    if (!sel.length) return shell('Properties', 'Selection', h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Select by'), resSeg()), h('p', { class: 'dim2', style: { margin: 0 } }, 'Tap an object in the 3D view. Double-tap zooms to it. Shift/Ctrl-click adds to the selection.'), showAllBtn ? h('div', { class: 'btn-row' }, showAllBtn) : null);
+    const i = viewer.info(sel);
+    const comp = viewer.selected.userData.comp || viewer.selected.userData.key;
+    const mtoMat = project.mtoMat?.[comp] || project.mtoMat?.[viewer.selected.userData.key] || viewer.selected.userData.material || guessMaterial(i.name, i.cat);
+    const n3 = (x) => fmt.num(x, 3);
+    shell(viewer.selectRes === 'item' && i.owner ? i.owner : i.name, 'Properties',
+      h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Select by'), resSeg()),
       h('dl', { class: 'kv' },
-        h('dt', {}, 'Layer'), h('dd', {}, i.layer),
+        i.type ? [h('dt', {}, 'Type'), h('dd', { class: 'no-i18n' }, i.type)] : null,
+        i.owner ? [h('dt', {}, 'Item'), h('dd', { class: 'no-i18n' }, i.owner)] : null,
+        h('dt', {}, 'Layer'), h('dd', { class: 'no-i18n' }, i.layer),
+        i.source && i.source !== i.name ? [h('dt', {}, 'Source'), h('dd', { class: 'no-i18n' }, i.source)] : null,
         i.cat ? [h('dt', {}, 'Category'), h('dd', {}, CATS[i.cat]?.label || i.cat)] : null,
-        h('dt', {}, 'Size L×W×H'), h('dd', {}, `${fmt.num(i.size.x)} × ${fmt.num(i.size.z)} × ${fmt.num(i.size.y)} m`),
-        h('dt', {}, 'Centre E / N'), h('dd', {}, `${fmt.num(i.center.x)} / ${fmt.num(-i.center.z)}`),
-        h('dt', {}, 'Elev. bottom / top'), h('dd', {}, `${fmt.num(i.center.y - i.size.y / 2)} / ${fmt.num(i.center.y + i.size.y / 2)}`),
-        h('dt', {}, 'Volume'), h('dd', {}, `${fmt.num(i.volume, 3)} m³`),
+        h('dt', {}, 'Parts'), h('dd', {}, fmt.int(i.parts)),
+        h('dt', {}, 'Size L×W×H'), h('dd', {}, `${n3(i.size.x)} × ${n3(i.size.z)} × ${n3(i.size.y)} m`),
+        h('dt', {}, 'Centre E / N'), h('dd', {}, `${n3(i.center.e)} / ${n3(i.center.n)}`),
+        h('dt', {}, 'Elev. bottom / top'), h('dd', {}, `${n3(i.bottom.el)} / ${n3(i.top.el)}`),
+        h('dt', {}, 'Volume'), h('dd', {}, i.closed ? `${n3(i.volume)} m³` : h('span', { class: 'dim2' }, 'open surface — no volume')),
         h('dt', {}, 'Surface'), h('dd', {}, `${fmt.num(i.area, 2)} m²`),
         h('dt', {}, 'Triangles'), h('dd', {}, fmt.int(i.tris))),
       h('div', { class: 'field' }, h('label', { for: 'mm' }, 'MTO material'), h('select', { class: 'inp', id: 'mm', onchange: async (e) => {
-        project.mtoMat = { ...(project.mtoMat || {}), [m.userData.key]: e.target.value };
+        project.mtoMat = { ...(project.mtoMat || {}), [comp]: e.target.value };
         await db.put('projects', project);
       } }, Object.entries(MATERIALS).map(([k, v]) => h('option', { value: k, selected: k === mtoMat }, v.label)))),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn sm', onclick: () => viewer.fit(m) }, icon('focus'), 'Zoom'),
-        h('button', { class: 'btn sm ghost', onclick: () => viewer.isolate([m]) }, 'Isolate'),
-        h('button', { class: 'btn sm ghost', onclick: () => { m.visible = false; viewer.select(null); viewer.requestRender(); } }, 'Hide'),
-        h('button', { class: 'btn sm ghost', onclick: () => viewer.showAll() }, 'Show all')));
+        h('button', { class: 'btn sm', onclick: () => viewer.fit(sel) }, icon('focus'), 'Zoom'),
+        h('button', { class: 'btn sm ghost', onclick: () => { viewer.isolate(sel); renderPanel(); } }, 'Isolate'),
+        h('button', { class: 'btn sm ghost', onclick: () => { viewer.setVisible(sel, false); renderPanel(); } }, icon('eyeoff'), 'Hide'),
+        h('button', { class: 'btn sm ghost', onclick: () => { const b = viewer.boundsOf(sel); b.expandByScalar(Math.max(0.5, b.getSize(new THREE.Vector3()).length() * 0.15)); viewer.setSection(true, b); viewer.fit(sel); toast('Section box set around the selection.', 'ok'); } }, icon('section'), 'Section'),
+        showAllBtn));
   }
   offs.push(viewer.on('select', () => { if (panel === 'info' || panel === 'layers') renderPanel(); else if (viewer.selected && window.innerWidth > 760 && !panel) openPanel('info'); }));
+  offs.push(viewer.on('visibility', () => { if (panel === 'info') renderPanel(); }));
 
   // ---------- Measure ----------
+  const M = viewer.measure;
+  const MODES = [['distance', 'Distance', 'ruler'], ['point', 'Point', 'target'], ['min', 'Shortest', 'zap']];
+  const HINT = {
+    distance: 'Tap the first point, then the second. Points snap to corners (■), edges (▲) and faces (●). Result: true distance, horizontal H, vertical V and ΔE / ΔN.',
+    point: 'Tap a point to read its coordinates (E, N, Elevation) in the model’s site system.',
+    min: 'Tap the first object, then the second. Shows the shortest clear distance between them.',
+  };
   function pMeasure() {
+    const items = M.items;
+    const u = (d, signed) => M.fmt(d, signed);
     shell('Measure', 'Distance',
-      h('div', { class: 'note' }, 'Tap two points on the model. Shows true distance, horizontal (H) and vertical (V) components in metres.'),
-      viewer.measures.length ? h('div', { class: 'clist' }, viewer.measures.map((m, i) => h('div', { class: 'citem', style: { cursor: 'default' } }, h('span', { class: 'id', style: { color: 'var(--yellow)' } }, `M${i + 1}`), h('div', { class: 'nm mono' }, `${fmt.num(m.d, 3)} m`, h('small', {}, `H ${fmt.num(m.dh, 3)} · V ${fmt.num(m.dv, 3)}`)), h('span', {})))) : null,
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn sm ghost', onclick: () => { viewer.clearMeasures(); pMeasure(); } }, icon('trash'), 'Clear'), h('button', { class: 'btn sm', onclick: () => toolClick('measure') }, 'Done')));
+      h('div', { class: 'seg seg-wide', role: 'group', 'aria-label': 'Measure mode' }, MODES.map(([k, l, ic]) => h('button', { type: 'button', class: M.mode === k ? 'on' : '', onclick: () => { M.setMode(k); pMeasure(); } }, icon(ic), l))),
+      h('div', { class: 'note' }, HINT[M.mode], M.pending ? h('b', { style: { display: 'block', marginTop: '6px' } }, M.mode === 'min' ? 'First object picked — tap the second.' : 'First point placed — tap the second.') : null),
+      h('div', { class: 'm-opts' },
+        h('div', { class: 'seg', role: 'group', 'aria-label': 'Units' }, [['m', 'm'], ['mm', 'mm']].map(([k, l]) => h('button', { type: 'button', class: `no-i18n ${M.units === k ? 'on' : ''}`, onclick: () => { M.setUnits(k); pMeasure(); } }, l))),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: M.snap, onchange: (e) => { M.snap = e.target.checked; } }), 'Snap')),
+      items.length ? h('div', { class: 'clist' }, items.map((r, i) => h('div', { class: 'citem m-item', onclick: () => M.focus(r.id) },
+        h('span', { class: 'id', style: { color: 'var(--hot)' } }, `M${i + 1}`),
+        r.kind === 'point'
+          ? h('div', { class: 'nm' }, h('span', { class: 'no-i18n' }, `E ${fmt.num(r.a.site.e, 3)}  N ${fmt.num(r.a.site.n, 3)}`), h('small', {}, `EL ${fmt.num(r.a.site.el, 3)} m`))
+          : h('div', { class: 'nm' }, h('b', { class: 'm-val' }, u(r.d)),
+            h('small', {}, `H ${u(r.dh)} · V ${u(r.dv, true)}`),
+            h('small', {}, `ΔE ${u(r.de, true)} · ΔN ${u(r.dn, true)}`),
+            r.kind === 'min' ? h('small', { class: 'no-i18n' }, `${r.names[0]} ↔ ${r.names[1]}`) : null),
+        h('button', { class: 'btn sm icon ghost', 'aria-label': 'Delete measurement', onclick: (e) => { e.stopPropagation(); M.remove(r.id); } }, icon('trash'))))) : null,
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'btn sm ghost', disabled: !items.length && !M.pending, onclick: () => M.undo() }, 'Undo'),
+        h('button', { class: 'btn sm ghost', disabled: !items.length, onclick: () => M.clear() }, icon('trash'), 'Clear'),
+        h('button', { class: 'btn sm ghost', disabled: !items.length, onclick: () => exportMeasures() }, icon('download'), 'CSV'),
+        h('button', { class: 'btn sm', onclick: () => toolClick('measure') }, icon('check'), 'Done')));
   }
-  offs.push(viewer.on('measure', () => panel === 'measure' && pMeasure()));
+  function exportMeasures() {
+    const rows = [['No', 'Type', 'Distance (m)', 'H (m)', 'V (m)', 'dE (m)', 'dN (m)', 'A E', 'A N', 'A Elev', 'B E', 'B N', 'B Elev']];
+    M.items.forEach((r, i) => {
+      const s = (p) => (p ? [p.site.e, p.site.n, p.site.el].map((x) => x.toFixed(4)) : ['', '', '']);
+      rows.push([`M${i + 1}`, r.kind, r.d?.toFixed(4) ?? '', r.dh?.toFixed(4) ?? '', r.dv?.toFixed(4) ?? '', r.de?.toFixed(4) ?? '', r.dn?.toFixed(4) ?? '', ...s(r.a), ...s(r.b)]);
+    });
+    const csv = rows.map((r) => r.join(',')).join('\n');
+    download(new Blob([csv], { type: 'text/csv' }), `${(project.code || 'project').replace(/[^\w-]+/g, '_')}_Measure_${fmt.today()}.csv`);
+  }
+  offs.push(M.on(() => { if (panel === 'measure') pMeasure(); }));
 
   // ---------- Section ----------
   function pSection() {
@@ -342,7 +435,7 @@ export async function renderReview(main, project) {
       h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: viewer.section.on, onchange: (e) => { viewer.setSection(e.target.checked, cur); } }), 'Enable section box'),
       sliders,
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn sm', disabled: !viewer.selected, onclick: () => { const b = viewer.boundsOf(viewer.selected).expandByScalar(1.5); viewer.setSection(true, b); pSection(); viewer.fit(viewer.selected); } }, 'Box around selection'),
+        h('button', { class: 'btn sm', disabled: !viewer.selected, onclick: () => { const b = viewer.boundsOf(viewer.selection); b.expandByScalar(Math.max(0.5, b.getSize(new THREE.Vector3()).length() * 0.15)); viewer.setSection(true, b); pSection(); viewer.fit(viewer.selection); } }, 'Box around selection'),
         h('button', { class: 'btn sm ghost', onclick: () => { viewer.setSection(false); pSection(); } }, 'Reset')));
   }
 
@@ -368,7 +461,12 @@ export async function renderReview(main, project) {
     const tests = (await db.byProject('clashtests', project.id)).sort((a, b) => b.created - a.created);
     const layers = [...viewer.layers.values()];
     const opts = [{ v: 'all', l: 'All visible layers' }, ...layers.map((L) => ({ v: L.id, l: L.name }))];
-    const cfg = { a: layers.find((L) => L.kind === 'plotplan')?.id || 'all', b: layers.find((L) => L.kind === 'import')?.id || 'all', mode: 'hard', tol: 50, same: true };
+    const imports = layers.filter((L) => L.kind === 'import');
+    const big = imports.slice().sort((p, q) => q.meshes.length - p.meshes.length)[0];
+    const cfg = pClash.cfg && layers.some((L) => L.id === pClash.cfg.a) ? pClash.cfg : (pClash.cfg = big && big.meshes.length >= 400
+      ? { a: big.id, b: big.id, mode: 'hard', tol: 5, same: false, item: true }
+      : { a: layers.find((L) => L.kind === 'plotplan')?.id || 'all', b: imports[0]?.id || 'all', mode: 'hard', tol: 5, same: false, item: true });
+    const tolIn = h('input', { class: 'inp mono', id: 'ct', type: 'number', min: 0, step: 1, value: cfg.tol, oninput: (e) => { cfg.tol = Number(e.target.value); } });
     const prog = h('div', { class: 'progress', hidden: true }, h('i'));
     const sel = (id, val, key) => h('select', { class: 'inp', id, onchange: (e) => { cfg[key] = e.target.value; } }, opts.map((o) => h('option', { value: o.v, selected: o.v === val }, o.l)));
     const results = h('div', { class: 'clist' });
@@ -378,13 +476,13 @@ export async function renderReview(main, project) {
       results.innerHTML = '';
       if (!current) return;
       const open = current.results.filter((r) => r.status !== 'Resolved' && r.status !== 'Approved').length;
-      results.append(h('div', { class: 'panel-title', style: { margin: '4px 0 2px' } }, h('div', { class: 'lbl' }, `${current.name} · ${current.results.length} clashes · ${open} open`),
+      results.append(h('div', { class: 'panel-title', style: { margin: '4px 0 2px' } }, h('div', { class: 'lbl' }, h('span', {}, `${current.name} · ${current.results.length} clashes · ${open} open`), current.touches ? h('small', { style: { display: 'block', marginTop: '3px', textTransform: 'none', letterSpacing: 0 } }, `${fmt.int(current.touches)} touching contacts ignored`) : null),
         h('button', { class: 'btn sm ghost', onclick: () => exportClash(current) }, icon('download'), 'XLSX')));
       if (!current.results.length) results.append(h('p', { class: 'dim2', style: { margin: 0 } }, `No clashes found (${fmt.int(current.pairsTested)} pairs tested).`));
       current.results.slice(0, 400).forEach((r) => {
         const row = h('div', { class: `citem ${r.n === current.focus ? 'on' : ''}`, onclick: () => focusClash(current, r) },
           h('span', { class: 'id' }, `#${fmt.pad(r.n)}`),
-          h('div', { class: 'nm' }, `${r.aName} ✕ ${r.bName}`, h('small', {}, `${r.type.toUpperCase()}${r.type === 'Clearance' ? ` · ${fmt.num(r.distance * 1000, 0)} mm` : ''} · E ${fmt.num(r.point[0], 1)} N ${fmt.num(-r.point[2], 1)} EL ${fmt.num(r.point[1], 2)}`)),
+          h('div', { class: 'nm' }, h('span', { class: 'no-i18n' }, `${r.aName} ✕ ${r.bName}`), h('small', {}, `${r.type}${r.type === 'Clearance' ? ` · ${fmt.num(r.distance * 1000, 0)} mm` : ''} · E ${fmt.num(r.point[0], 1)} N ${fmt.num(-r.point[2], 1)} EL ${fmt.num(r.point[1], 2)}`)),
           h('select', { class: 'inp', style: { width: '108px', minHeight: '28px', fontSize: '12px', color: STATUS_C[r.status], borderLeftColor: STATUS_C[r.status] }, 'aria-label': 'Clash status', onclick: (e) => e.stopPropagation(), onchange: async (e) => { r.status = e.target.value; await db.put('clashtests', current); drawResults(); } },
             STATUS.map((s) => h('option', { value: s, selected: s === r.status }, s))));
         results.append(row);
@@ -395,8 +493,14 @@ export async function renderReview(main, project) {
         h('div', { class: 'field' }, h('label', { for: 'ca' }, 'Selection A'), sel('ca', cfg.a, 'a')),
         h('div', { class: 'field' }, h('label', { for: 'cb' }, 'Selection B'), sel('cb', cfg.b, 'b')),
         h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr 1fr' } },
-          h('div', { class: 'field' }, h('label', { for: 'cm' }, 'Type'), h('select', { class: 'inp', id: 'cm', onchange: (e) => { cfg.mode = e.target.value; } }, h('option', { value: 'hard' }, 'Hard'), h('option', { value: 'clearance' }, 'Clearance'))),
-          h('div', { class: 'field' }, h('label', { for: 'ct' }, 'Clearance (mm)'), h('input', { class: 'inp mono', id: 'ct', type: 'number', value: cfg.tol, oninput: (e) => { cfg.tol = Number(e.target.value); } }))),
+          h('div', { class: 'field' }, h('label', { for: 'cm' }, 'Type'), h('select', { class: 'inp', id: 'cm', onchange: (e) => {
+            cfg.mode = e.target.value;
+            if (cfg.mode === 'clearance' && cfg.tol === 5) cfg.tol = 50;
+            if (cfg.mode === 'hard' && cfg.tol === 50) cfg.tol = 5;
+            tolIn.value = cfg.tol;
+          } }, h('option', { value: 'hard', selected: cfg.mode === 'hard' }, 'Hard'), h('option', { value: 'clearance', selected: cfg.mode === 'clearance' }, 'Clearance'))),
+          h('div', { class: 'field' }, h('label', { for: 'ct', title: 'Hard: contact and penetration up to this depth are ignored. Clearance: report gaps smaller than this.' }, 'Tolerance (mm)'), tolIn)),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: cfg.item, onchange: (e) => { cfg.item = e.target.checked; } }), 'Ignore clashes inside the same item (pipe branch, equipment)'),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: cfg.same, onchange: (e) => { cfg.same = e.target.checked; } }), 'Ignore clashes inside the same layer')),
       h('button', { class: 'btn primary', onclick: async (e) => {
         const btn = e.currentTarget;
@@ -406,9 +510,9 @@ export async function renderReview(main, project) {
         btn.disabled = true; prog.hidden = false;
         const t0 = performance.now();
         try {
-          const res = await runClash({ setA: A, setB: B, mode: cfg.mode, tolerance: cfg.tol / 1000, ignoreSameLayer: cfg.same, onProgress: (p) => { prog.firstChild.style.width = `${p * 100}%`; } });
+          const res = await runClash({ setA: A, setB: B, mode: cfg.mode, tolerance: cfg.tol / 1000, ignoreSameLayer: cfg.same && cfg.a !== cfg.b, ignoreSameItem: cfg.item, onProgress: (p) => { prog.firstChild.style.width = `${p * 100}%`; } });
           const nm = (k) => (k === 'all' ? 'All' : viewer.layers.get(k)?.name || k);
-          const test = { id: uid('c'), projectId: project.id, name: `${cfg.mode === 'hard' ? 'Hard' : `Clearance ${cfg.tol} mm`} · ${nm(cfg.a)} vs ${nm(cfg.b)}`, ...cfg, created: Date.now(), results: res.results, pairsTested: res.pairsTested, seconds: (performance.now() - t0) / 1000 };
+          const test = { id: uid('c'), projectId: project.id, name: `${cfg.mode === 'hard' ? `Hard ${cfg.tol} mm` : `Clearance ${cfg.tol} mm`} · ${nm(cfg.a)} vs ${nm(cfg.b)}`, ...cfg, created: Date.now(), results: res.results, pairsTested: res.pairsTested, touches: res.touches || 0, seconds: (performance.now() - t0) / 1000 };
           await db.put('clashtests', test);
           lastClash = test.id; current = test;
           toast(`${res.results.length} clashes · ${fmt.int(res.pairsTested)} pairs · ${test.seconds.toFixed(1)} s`, res.results.length ? 'warn' : 'ok', 'Clash test');
@@ -427,10 +531,11 @@ export async function renderReview(main, project) {
     if (!a || !b) return toast('Objects of this clash are no longer loaded (model changed?).', 'warn');
     test.focus = r.n;
     viewer.select(null);
-    viewer.highlightPair(a, b);
+    const ga = viewer.groupOf(a, 'component'), gb = viewer.groupOf(b, 'component');
+    viewer.highlightPair(ga, gb);
     viewer.clearLabels('clash');
-    viewer.addLabel(new THREE.Vector3(...r.point), `#${fmt.pad(r.n)} ${r.type.toUpperCase()}`, 'clash');
-    viewer.fit([a, b]);
+    viewer.addLabel(new THREE.Vector3(...r.point), `#${fmt.pad(r.n)} ${r.type}`, 'clash');
+    viewer.fit([...ga, ...gb]);
     drawer.querySelectorAll('.citem').forEach((el) => el.classList.toggle('on', el.querySelector('.id')?.textContent === `#${fmt.pad(r.n)}`));
   }
   function exportClash(t) {
@@ -466,11 +571,11 @@ export async function renderReview(main, project) {
         h('thead', {}, h('tr', {}, h('th', {}, 'Material'), h('th', { class: 'num' }, 'Qty'), h('th', { class: 'num' }, 'Vol m³'), h('th', { class: 'num' }, 'Weight t'))),
         h('tbody', {}, summary.map((s) => h('tr', {}, h('td', {}, h('span', { class: 'chip dot', style: { '--c': MATERIALS[s.material]?.color } }, SHORT[s.material] || s.material)),
           h('td', { class: 'num' }, s.count), h('td', { class: 'num' }, fmt.num(s.volume, 3)), h('td', { class: 'num' }, s.weight ? fmt.num(s.weight / 1000, 2) : '—')))))),
-      summary.some((s) => s.open) ? h('div', { class: 'note' }, h('b', {}, `${summary.reduce((n, s) => n + s.open, 0)} open meshes. `), 'Their volume is approximate (surfaces not closed). Area values are still exact.') : null,
-      h('div', { class: 'lbl' }, `Largest items · ${rows.length} total`),
-      h('div', { class: 'clist' }, rows.slice().sort((a, b) => b.volume - a.volume).slice(0, 60).map((r) => h('div', { class: 'citem', onclick: () => { const m = viewer.findByKey(r.key); if (m) { viewer.select(m); viewer.fit(m); } } },
+      summary.some((s) => s.open) ? h('div', { class: 'note' }, h('b', {}, `${fmt.int(summary.reduce((n, s) => n + s.open, 0))} open surfaces. `), 'They have no enclosed volume (single-sided panels, pipe walls without ends), so only their area is counted.') : null,
+      h('div', { class: 'lbl' }, `Largest items · ${fmt.int(rows.length)} total`),
+      h('div', { class: 'clist' }, rows.slice().sort((a, b) => b.volume - a.volume).slice(0, 60).map((r) => h('div', { class: 'citem', onclick: () => { const m = viewer.findByKey(r.key); if (m) { viewer.select(m, { res: 'component' }); viewer.fit(viewer.selection); } } },
         h('span', { class: 'chip', style: { '--c': MATERIALS[r.material]?.color } }, SHORT[r.material] || r.material),
-        h('div', { class: 'nm' }, r.name, h('small', {}, `${fmt.num(r.L)}×${fmt.num(r.W)}×${fmt.num(r.H)} m${r.closed ? '' : ' · open'}`)),
+        h('div', { class: 'nm' }, h('span', { class: 'no-i18n' }, r.name), h('small', {}, `${fmt.num(r.L)}×${fmt.num(r.W)}×${fmt.num(r.H)} m${r.closed ? '' : ' · open'}`)),
         h('span', { class: 'mono', style: { fontSize: '12px' } }, `${fmt.num(r.volume, 3)} m³`))))].filter(Boolean));
     };
     shell('MTO quantities', 'Material take-off',
@@ -494,17 +599,17 @@ export async function renderReview(main, project) {
           const blob = buildXlsx([{
             name: 'MTO', title: `${project.code || ''} ${project.name} — Material Take-Off from 3D (${fmt.date(fmt.today())})`,
             columns: [
-              { header: 'No', key: (r) => lastMTO.rows.indexOf(r) + 1, type: 'n', dp: 0, width: 6 }, { header: 'Layer', key: 'layer', width: 24 }, { header: 'Object / Tag', key: 'name', width: 32 },
+              { header: 'No', key: (r) => lastMTO.rows.indexOf(r) + 1, type: 'n', dp: 0, width: 6 }, { header: 'Layer', key: 'layer', width: 24 }, { header: 'Object / Tag', key: 'name', width: 40 }, { header: 'Parts', key: 'parts', type: 'n', dp: 0, width: 7 },
               { header: 'Category', key: (r) => CATS[r.cat]?.label || '', width: 18 }, { header: 'Material', key: (r) => MATERIALS[r.material]?.label, width: 14 },
               { header: 'L (m)', key: 'L', type: 'n', width: 9 }, { header: 'W (m)', key: 'W', type: 'n', width: 9 }, { header: 'H (m)', key: 'H', type: 'n', width: 9 },
               { header: 'Area (m²)', key: 'area', type: 'n', width: 11 }, { header: 'Volume (m³)', key: 'volume', type: 'n', dp: 3, width: 12 },
               { header: 'Density (kg/m³)', key: 'density', type: 'n', dp: 0, width: 14 }, { header: 'Weight (kg)', key: 'weight', type: 'n', dp: 0, width: 12 },
-              { header: 'Closed solid', key: (r) => (r.closed ? 'YES' : 'NO – approx.'), width: 13 },
+              { header: 'Closed solid', key: (r) => (r.closed ? 'YES' : 'NO – area only'), width: 15 },
             ],
             rows: lastMTO.rows,
           }, {
             name: 'Summary', title: 'Summary by material',
-            columns: [{ header: 'Material', key: (s) => MATERIALS[s.material]?.label, width: 22 }, { header: 'Items', key: 'count', type: 'n', dp: 0 }, { header: 'Volume (m³)', key: 'volume', type: 'n', dp: 3, width: 13 }, { header: 'Area (m²)', key: 'area', type: 'n', width: 13 }, { header: 'Weight (t)', key: (s) => s.weight / 1000, type: 'n', dp: 3, width: 12 }, { header: 'Open meshes', key: 'open', type: 'n', dp: 0, width: 12 }],
+            columns: [{ header: 'Material', key: (s) => MATERIALS[s.material]?.label, width: 22 }, { header: 'Components', key: 'count', type: 'n', dp: 0, width: 12 }, { header: 'Volume (m³)', key: 'volume', type: 'n', dp: 3, width: 13 }, { header: 'Area (m²)', key: 'area', type: 'n', width: 13 }, { header: 'Weight (t)', key: (s) => s.weight / 1000, type: 'n', dp: 3, width: 12 }, { header: 'Open meshes', key: 'open', type: 'n', dp: 0, width: 12 }],
             rows: lastMTO.summary,
           }]);
           download(blob, `${(project.code || 'project').replace(/[^\w-]+/g, '_')}_MTO_${fmt.today()}.xlsx`);
@@ -598,6 +703,7 @@ export async function renderReview(main, project) {
     viewer.clearHighlights();
     viewer.setMode('select');
     offs.forEach((f) => f());
+    viewer.setInset({});
     viewer.host.remove();
   };
 }

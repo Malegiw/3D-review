@@ -69,8 +69,23 @@ export const MATERIALS = {
 
 const STEEL_RX = /\b(pipe|pp|line|beam|col(umn)?|brace|bracing|steel|str|plate|pl|hss|chs|shs|rhs|wf|ipe|hea|heb|unp|angle|grating|stair|ladder|handrail|platform|tray|ct-|rack|skid|vessel|tank|support|shoe|flange|valve|elbow|tee|reducer)/i;
 const CONC_RX = /\b(conc|concrete|fdn|foundation|footing|pile ?cap|pedestal|ped|slab|pad|paving|road|wall|bund|dike|pit|basin|sump|grout|rc|kerb|curb)/i;
+// E3D / PDMS owner types (the chain after " of ") say more than the primitive name ("CYLINDER 1 of BRANCH /P-101").
+// Equipment and piping are modelled as solid envelopes (a tank is a full cylinder, a pipe a solid rod at OD), so their
+// volume is not a material quantity: they count as Other, like plot plan envelopes. Steel = structural members.
+const OWNER_ENVELOPE = /\b(EQUIPMENT|SUBEQUIPMENT|EQUI|SUBE|NOZZ|NOZZLE|BRANCH|BRAN|PIPE|INSTRUMENT|VALVE)\b/i;
+const OWNER_STEEL = /\b(GENSEC|SCTN|SECTION|STEEL|HANDRAIL|STAIR|SPIRALSTAIR|LADDER|GRATING|PLATFORM|GUARDRAIL|PIPERACK|PIPE-?RACK|SUPPORT|HANGER|CABLETRAY)/i;
+const OWNER_CONC = /\b(FDN|FOUND|FOUNDATION|FOOTING|PEDESTAL|SLAB|PAVE|PAVING|ROAD|BUND|BUNDWALL|DIKE|PIT|SUMP|KERB|CURB|CONC|CONCRETE)/i;
 export function guessMaterial(name = '', cat = '') {
   if (cat && CATS[cat]) return CATS[cat].mat;
+  const i = name.indexOf(' of ');
+  if (i > 0) {
+    const chain = name.slice(i + 4);
+    if (OWNER_CONC.test(chain)) return 'concrete';
+    if (OWNER_STEEL.test(chain)) return 'steel';
+    if (OWNER_ENVELOPE.test(chain)) return 'other';
+    if (/^(GENSEC|SCTN|BEAM|COLUMN|BRACE|JOIST)\b/i.test(name)) return 'steel';
+    return 'other';
+  }
   if (CONC_RX.test(name)) return 'concrete';
   if (STEEL_RX.test(name)) return 'steel';
   return 'other';

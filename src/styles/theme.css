@@ -627,3 +627,61 @@ table.tbl { width: 100%; border-collapse: collapse; font: 500 14px/1.35 var(--f-
 .tbl td.mono { white-space: nowrap; }
 .tbl select.st-sel { min-width: 158px; }
 [data-theme="cyber"] .rail a, [data-theme="cyber"] .tool, [data-theme="cyber"] .lang button { border-radius: 0; }
+
+/* ---------- model tree (layer → item → component) ---------- */
+.tree { max-height: min(46vh, 420px); }
+.tree-h { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--bg-3); border-bottom: 1px solid var(--line); font: 650 12px/1.2 var(--f-ui); color: var(--fg-2); }
+.tree-h small { color: var(--fg-3); font-weight: 500; }
+.tree button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.tree button .tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree button small { color: var(--fg-3); font: 500 11px/1 var(--f-ui); white-space: nowrap; }
+.tree button.leaf { padding-left: 34px; grid-template-columns: minmax(0, 1fr) auto; font-size: 12px; }
+.tree button.on { box-shadow: inset 3px 0 0 var(--hot); }
+.tree .tw { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 4px; }
+.tree .tw::before { content: ""; width: 6px; height: 6px; border-right: 1.6px solid var(--fg-3); border-bottom: 1.6px solid var(--fg-3); transform: rotate(-45deg); transition: transform .15s; }
+.tree .tw.open::before { transform: rotate(45deg); }
+.tree .tw.none::before { display: none; }
+.tree .tw:hover { background: var(--bg-4); }
+.tree-more { padding: 8px 10px; font: 500 12px/1.3 var(--f-ui); color: var(--fg-3); }
+
+/* ---------- measure ---------- */
+.m-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 2; }
+.m-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 3; }
+.m-line { stroke: var(--hot); stroke-width: 2.5; stroke-linecap: round; }
+[data-theme="cyber"] .m-line { stroke: var(--yellow); filter: drop-shadow(0 0 3px var(--yellow)); }
+.m-line.live { stroke-dasharray: 6 5; opacity: .9; }
+.m-line.min { stroke: var(--violet); }
+.m-leg { stroke: var(--cyan); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: .85; }
+.m-leg.v { stroke: var(--green); }
+.m-dot { fill: var(--bg-2); stroke: var(--hot); stroke-width: 2.5; }
+.m-dot.pending { fill: var(--hot); }
+.m-dot.pt { fill: var(--hot); stroke: var(--bg-2); }
+.m-snap { fill: none; stroke: var(--hot); stroke-width: 2; }
+.m-label { position: absolute; left: 0; top: 0; font: 650 12px/1 var(--f-ui); font-variant-numeric: tabular-nums; color: var(--hot-ink); background: var(--hot); padding: 5px 8px; border-radius: 6px; white-space: nowrap; box-shadow: var(--shadow-float); }
+.m-label.live { background: var(--glass-strong); color: var(--fg); border: 1px solid var(--line); }
+.m-label.min { background: var(--violet); color: #fff; }
+.m-label.pt { background: var(--glass-strong); color: var(--fg); border: 1px solid var(--hot); }
+[data-theme="cyber"] .m-label { font: 400 12px/1 var(--f-mono); background: var(--yellow); color: var(--ink); border-radius: 0; }
+.seg-wide { display: grid; grid-template-columns: repeat(3, 1fr); }
+.seg-wide button { justify-content: center; }
+.m-opts { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.m-item { grid-template-columns: auto 1fr auto; }
+.m-item .nm small { white-space: normal; }
+.m-val { font: 750 17px/1.2 var(--f-ui); font-variant-numeric: tabular-nums; display: block; }
+:root:not([data-theme="cyber"]) .tree button { font-family: var(--f-ui); font-size: 13px; }
+.tree button.hit { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+.tree button.hit small { overflow: hidden; text-overflow: ellipsis; text-align: right; }
+@media (max-width: 760px) {
+  .drawer .note { font-size: 13px; padding: 6px 10px; }
+  .drawer-body { gap: 10px; padding: 12px; }
+}
+.drawer-title { min-width: 0; flex: 1; }
+.drawer-title h3 { overflow-wrap: anywhere; }
+.drawer-grip { display: none; }
+@media (max-width: 760px) {
+  .drawer-head { position: relative; padding-top: 18px; }
+  .drawer-grip { display: block; position: absolute; left: 50%; top: 6px; transform: translateX(-50%); width: 44px; height: 14px; border: 0; background: transparent; cursor: pointer; }
+  .drawer-grip::before { content: ""; display: block; width: 36px; height: 4px; margin: 5px auto 0; border-radius: 4px; background: var(--fg-3); opacity: .5; }
+  .drawer.min .drawer-body { display: none; }
+  .drawer.min { max-height: none; }
+}
