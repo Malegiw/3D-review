@@ -17,40 +17,6 @@
       "converted": "2026-11-01T04:47:30.836Z"
     },
     {
-      "name": "3D_MENO_-_Re-IFA_06.04.26_2",
-      "file": "1793612846186-3d-meno-re-ifa-06-04-26-2.glb",
-      "source": "1793612846186-3D_MENO_-_Re-IFA_06.04.26_2.nwd",
-      "size": 7765024,
-      "units": "m",
-      "zUp": false,
-      "origin": [
-        699929,
-        0,
-        -84412
-      ],
-      "objects": 222787,
-      "merged": true,
-      "engine": "nwd-reader",
-      "converted": "2026-11-02T15:40:25.434Z"
-    },
-    {
-      "name": "3D_MENO_-_Re-IFA_06.04.26_",
-      "file": "1793619420824-3d-meno-re-ifa-06-04-26.glb",
-      "source": "1793619420824-3D_MENO_-_Re-IFA_06.04.26_.nwd",
-      "size": 7765024,
-      "units": "m",
-      "zUp": false,
-      "origin": [
-        699929,
-        0,
-        -84412
-      ],
-      "objects": 222787,
-      "merged": true,
-      "engine": "nwd-reader",
-      "converted": "2026-11-02T15:40:33.194Z"
-    },
-    {
       "name": "3D_MENO_-_Re-IFA_06.04.26_",
       "file": "1793625851106-3d-meno-re-ifa-06-04-26.glb",
       "source": "1793625851106-3D_MENO_-_Re-IFA_06.04.26_.nwd",
