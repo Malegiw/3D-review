@@ -138,8 +138,10 @@ jobs:
 
       - name: Convert NWD / NWC (no Autodesk)
         if: steps.files.outputs.nwd != '0'
+        timeout-minutes: 45
         env:
           NEXUS_QUIET: ${{ steps.files.outputs.enc == 'true' && '1' || '' }}
+          NWD_TIMEOUT_MIN: '30'
         run: |
           cmake -S tools/nwd2glb -B "$RUNNER_TEMP/n2g" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/nwd-install"
           cmake --build "$RUNNER_TEMP/n2g" --parallel "$(nproc)"

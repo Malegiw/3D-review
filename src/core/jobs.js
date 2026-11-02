@@ -71,7 +71,7 @@ function failureMessage(steps) {
   if (!bad) return 'Conversion did not finish. Open the run on GitHub for the log.';
   if (/credential/i.test(bad.name)) return 'This format (DWFx/SKP/RVT/IFC/NWF) needs Autodesk keys: add APS_CLIENT_ID and APS_CLIENT_SECRET under Settings → Secrets → Actions, re-run the job on GitHub, then press Retry. NWD and NWC files don’t need them.';
   if (/install nwd reader/i.test(bad.name)) return 'Building the NWD reader failed on GitHub. Re-run the job; if it repeats, open the run log.';
-  if (/convert nwd/i.test(bad.name)) return 'The NWD reader could not read this file (possibly a newer Navisworks version). Open the run log, or export FBX from Navisworks.';
+  if (/convert nwd/i.test(bad.name)) return 'The NWD conversion failed or took longer than 30 minutes (very heavy model or a newer Navisworks version). Open the run log, or export FBX/IFC from Navisworks, or split the model by area.';
   if (/install/i.test(bad.name)) return 'Installing the converter failed on GitHub. Re-run the job.';
   if (/autodesk/i.test(bad.name)) return 'Autodesk could not translate this file (see the run log). Check the APS keys and that the file opens in Navisworks/SketchUp.';
   return `Failed at “${bad.name}”. Open the run on GitHub for the log.`;
