@@ -180,9 +180,13 @@ export function download(blob, filename) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
 }
 
+// iOS/iPadOS greys out (locks) files whose extension has no registered UTI (.nwd, .dwfx, .skp …) when `accept` lists them,
+// so on those devices the filter is dropped for CAD extensions and callers validate the extension afterwards.
+const IOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+const CAD_EXT = /\.(?:nwd|nwc|nwf|dwfx|dwf|skp|rvt|iam|ipt|3dm|stp|step)(?:,|$)/i;
 export function pickFiles({ accept = '', multiple = false } = {}) {
   return new Promise((resolve) => {
-    const inp = h('input', { type: 'file', accept, multiple, style: { display: 'none' } });
+    const inp = h('input', { type: 'file', accept: IOS && CAD_EXT.test(accept) ? '' : accept, multiple, style: { display: 'none' } });
     inp.addEventListener('change', () => { resolve([...inp.files]); inp.remove(); });
     document.body.append(inp);
     inp.click();

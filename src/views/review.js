@@ -136,7 +136,10 @@ export async function renderReview(main, project) {
 
   // ---------- Models / layers ----------
   async function importFiles() {
-    const files = await pickFiles({ accept: ACCEPT, multiple: true });
+    const picked = await pickFiles({ accept: ACCEPT, multiple: true });
+    const okExt = ACCEPT.split(',').map((x) => x.slice(1));
+    const files = picked.filter((f) => okExt.includes(ext(f.name)));
+    if (picked.length && !files.length) return toast(`Unsupported file type: .${ext(picked[0].name)}`, 'warn');
     if (!files.length) return;
     const natives = files.filter((f) => NATIVE_EXT.includes(ext(f.name)));
     if (natives.length && natives.length === files.length) return convertFiles(natives);
@@ -170,7 +173,7 @@ export async function renderReview(main, project) {
   async function convertFiles(list) {
     const cfg = await getConverter();
     if (!cfg?.repo || !cfg?.token) return converterHelp(list?.[0]?.name || 'model.nwd');
-    if (!list) list = await pickFiles({ accept: NATIVE_EXT.map((x) => `.${x}`).join(','), multiple: true });
+    if (!list) list = (await pickFiles({ accept: NATIVE_EXT.map((x) => `.${x}`).join(','), multiple: true })).filter((f) => NATIVE_EXT.includes(ext(f.name)));
     if (!list?.length) return;
     openPanel('layers');
     for (const f of list) {
