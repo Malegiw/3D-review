@@ -16,6 +16,13 @@ function toBase64(bytes) {
   for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
   return btoa(s);
 }
+/** Large files: base64 in 3 MB slices (multiple of 3 → no padding mid-stream) so the whole file is never held as one giant string. */
+async function blobToB64Parts(blob) {
+  const parts = [];
+  const SLICE = 3 * 1024 * 1024;
+  for (let i = 0; i < blob.size; i += SLICE) parts.push(toBase64(new Uint8Array(await blob.slice(i, i + SLICE).arrayBuffer())));
+  return parts;
+}
 const utf8b64 = (str) => toBase64(new TextEncoder().encode(str));
 
 export class GitHubError extends Error {
@@ -36,13 +43,13 @@ export class GitHubRepo {
   get slug() { return `${this.owner}/${this.name}`; }
   get webUrl() { return `https://github.com/${this.slug}`; }
 
-  async api(path, { method = 'GET', body, accept = 'application/vnd.github+json', raw = false } = {}) {
+  async api(path, { method = 'GET', body, rawBody, accept = 'application/vnd.github+json', raw = false } = {}) {
     let res;
     try {
       res = await this._fetch(`${API}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${this.token}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
+      headers: { Authorization: `Bearer ${this.token}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28', ...(body || rawBody ? { 'Content-Type': 'application/json' } : {}) },
+      body: rawBody || (body ? JSON.stringify(body) : undefined),
       });
     } catch {
       throw new GitHubError(0, 'Cannot reach GitHub from this page (offline, or a preview sandbox that blocks network). Use the app from GitHub Pages or review3d.html.');
@@ -92,12 +99,15 @@ export class GitHubRepo {
     try { return (await this.api(`/repos/${this.owner}/${this.name}/contents/${encPath(path)}?ref=${encodeURIComponent(this.branch)}`)).sha; } catch (e) { if (e.status === 404) return null; throw e; }
   }
 
-  async putFile(path, base64, message) {
+  /** content: base64 string, or an array of base64 parts (large files — sent as a Blob body instead of one huge string). */
+  async putFile(path, content, message) {
     if (!this.branch) await this.info();
     const sha = await this.fileSha(path);
-    const r = await this.api(`/repos/${this.owner}/${this.name}/contents/${encPath(path)}`, {
-      method: 'PUT', body: { message, content: base64, branch: this.branch, ...(sha ? { sha } : {}) },
-    });
+    const url = `/repos/${this.owner}/${this.name}/contents/${encPath(path)}`;
+    const meta = { message, branch: this.branch, ...(sha ? { sha } : {}) };
+    const r = typeof content === 'string'
+      ? await this.api(url, { method: 'PUT', body: { ...meta, content } })
+      : await this.api(url, { method: 'PUT', rawBody: new Blob([`${JSON.stringify(meta).slice(0, -1)},"content":"`, ...content, '"}'], { type: 'application/json' }) });
     return r.commit.sha;
   }
 
@@ -114,8 +124,13 @@ export class GitHubRepo {
   /** Commit a native model into models/incoming/ → triggers the convert workflow. Returns the commit SHA. */
   async uploadModel(blob, fileName) {
     if (blob.size > MAX_UPLOAD + 64) throw new Error(`File is ${(blob.size / 1048576).toFixed(0)} MB — the in-app upload limit is ${MAX_UPLOAD / 1048576} MB. Use “Run workflow” with a download link on GitHub instead.`);
-    const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
-    return this.putFile(`models/incoming/${fileName}`, b64, `Convert ${fileName}`);
+    const parts = await blobToB64Parts(blob);
+    try {
+      return await this.putFile(`models/incoming/${fileName}`, parts, `Convert ${fileName}`);
+    } catch (e) {
+      if (e.status === 0 && blob.size > 8 * 1048576) throw new GitHubError(0, 'Upload to GitHub was interrupted (connection dropped or the device ran out of memory on this large file). Try again on a stable connection, or use “Run workflow” with a download link on GitHub.');
+      throw e;
+    }
   }
 
   async runForCommit(sha) {

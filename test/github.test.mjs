@@ -16,7 +16,7 @@ function mockGitHub() {
     if (p.startsWith('/repos/yan/conv/contents/')) {
       const path = decodeURIComponent(p.slice('/repos/yan/conv/contents/'.length));
       if ((opt.method || 'GET') === 'PUT') {
-        const body = JSON.parse(opt.body);
+        const body = JSON.parse(typeof opt.body === 'string' ? opt.body : await opt.body.text());
         assert.equal(body.branch, 'main');
         files.set(path, Buffer.from(body.content, 'base64').toString('utf8'));
         return json({ commit: { sha: 'sha-' + path.split('/').pop() } }, 201);

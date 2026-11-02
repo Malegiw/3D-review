@@ -451,6 +451,7 @@ const E = {
   'Repository must look like owner/name.': 'Repository harus berformat owner/nama.',
   'A GitHub token is required.': 'Token GitHub wajib diisi.',
   'Cannot reach GitHub from this page (offline, or a preview sandbox that blocks network). Use the app from GitHub Pages or review3d.html.': 'GitHub tidak bisa dijangkau dari halaman ini (offline, atau sandbox preview yang memblokir jaringan). Pakai app dari GitHub Pages atau review3d.html.',
+  'Upload to GitHub was interrupted (connection dropped or the device ran out of memory on this large file). Try again on a stable connection, or use “Run workflow” with a download link on GitHub.': 'Upload ke GitHub terputus (koneksi putus atau memori perangkat habis untuk file besar ini). Coba lagi dengan koneksi stabil, atau pakai “Run workflow” dengan link unduhan di GitHub.',
   'Token rejected — check it has not expired.': 'Token ditolak — cek apakah sudah kedaluwarsa.',
   'Token lacks permission for this repository (needs Contents, Actions and Workflows access).': 'Token tidak punya izin untuk repository ini (butuh akses Contents, Actions dan Workflows).',
   'Not found — check the repository name and that the token can access it.': 'Tidak ditemukan — cek nama repository dan apakah token bisa mengaksesnya.',
