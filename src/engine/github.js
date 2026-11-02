@@ -122,13 +122,27 @@ export class GitHubRepo {
   }
 
   /** Commit a native model into models/incoming/ → triggers the convert workflow. Returns the commit SHA. */
-  async uploadModel(blob, fileName) {
+  async uploadModel(blob, fileName, onProgress) {
     if (blob.size > MAX_UPLOAD + 64) throw new Error(`File is ${(blob.size / 1048576).toFixed(0)} MB — the in-app upload limit is ${MAX_UPLOAD / 1048576} MB. Use “Run workflow” with a download link on GitHub instead.`);
-    const parts = await blobToB64Parts(blob);
+    if (blob.size <= 8 * 1048576) return this.putFile(`models/incoming/${fileName}`, toBase64(new Uint8Array(await blob.arrayBuffer())), `Convert ${fileName}`);
+    // Large file: many small requests (3 MB each) into models/parts/<name>/NNNN — that path does not trigger the workflow.
+    // The final tiny marker models/incoming/<name>.parts does; the workflow then joins the parts back into <name>.
+    const PART = 3 * 1024 * 1024;
+    const total = Math.ceil(blob.size / PART);
     try {
-      return await this.putFile(`models/incoming/${fileName}`, parts, `Convert ${fileName}`);
+      for (let i = 0; i < total; i++) {
+        onProgress?.(i + 1, total);
+        const b64 = toBase64(new Uint8Array(await blob.slice(i * PART, (i + 1) * PART).arrayBuffer()));
+        for (let attempt = 0; ; attempt++) {
+          try { await this.putFile(`models/parts/${fileName}/${String(i + 1).padStart(4, '0')}`, b64, `Upload ${fileName} part ${i + 1}/${total}`); break; } catch (e) {
+            if (e.status !== 0 || attempt >= 2) throw e;
+            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          }
+        }
+      }
+      return await this.putFile(`models/incoming/${fileName}.parts`, utf8b64(String(total)), `Convert ${fileName}`);
     } catch (e) {
-      if (e.status === 0 && blob.size > 8 * 1048576) throw new GitHubError(0, 'Upload to GitHub was interrupted (connection dropped or the device ran out of memory on this large file). Try again on a stable connection, or use “Run workflow” with a download link on GitHub.');
+      if (e.status === 0) throw new GitHubError(0, 'Upload to GitHub was interrupted (connection dropped or the device ran out of memory on this large file). Try again on a stable connection, or use “Run workflow” with a download link on GitHub.');
       throw e;
     }
   }

@@ -53,6 +53,16 @@ jobs:
         run: |
           mkdir -p models/incoming "$RUNNER_TEMP/dl" "$RUNNER_TEMP/dec"
           shopt -s nullglob nocaseglob
+          # large uploads from the app arrive as models/parts/<name>/NNNN plus a marker models/incoming/<name>.parts (= part count)
+          for m in models/incoming/*.parts; do
+            n=$(basename "$m" .parts)
+            parts=(models/parts/"$n"/*)
+            want=$(tr -dc '0-9' < "$m")
+            if [ ${#parts[@]} -eq 0 ] || [ "${#parts[@]}" != "$want" ]; then echo "::error::Upload of $n incomplete: expected $want parts, found ${#parts[@]}."; exit 1; fi
+            cat "${parts[@]}" > "models/incoming/$n"
+            rm -rf "models/parts/$n" "$m"
+            echo "Joined ${#parts[@]} parts into $n"
+          done
           nxe=(models/incoming/*.nxe)
           ENC=false; [ ${#nxe[@]} -gt 0 ] && ENC=true
           if [ ${#nxe[@]} -gt 0 ]; then

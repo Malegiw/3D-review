@@ -49,7 +49,7 @@ export async function startConversion(projectId, file) {
   try {
     if (encrypted && !cfg.key) throw new Error('Encryption key missing on this device — open converter settings.');
     const payload = encrypted ? await encryptBlob(file, cfg.key) : file;
-    job.sha = await gh.uploadModel(payload, uploadName);
+    job.sha = await gh.uploadModel(payload, uploadName, (i, n) => { job.step = `Uploading part ${i}/${n}`; save(job); });
     Object.assign(job, { status: 'queued', step: 'Waiting for GitHub Actions to start', queuedAt: Date.now() });
   } catch (e) {
     Object.assign(job, { status: 'failed', message: e.message });

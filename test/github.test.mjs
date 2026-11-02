@@ -47,6 +47,12 @@ test('GitHubRepo: check, install, upload, find run, download output', async () =
   const sha = await gh.uploadModel(new Blob([new Uint8Array([1, 2, 3, 250])]), '123-PIPING.nwd');
   assert.equal(sha, 'sha-123-PIPING.nwd');
   assert.equal(m.files.get('models/incoming/123-PIPING.nwd').length > 0, true);
+  const seen = [];
+  await gh.uploadModel(new Blob([new Uint8Array(9 * 1048576)]), 'big.nwd', (i, n) => seen.push(`${i}/${n}`));
+  assert.deepEqual(seen, ['1/3', '2/3', '3/3']);
+  assert.ok(m.files.has('models/parts/big.nwd/0001') && m.files.has('models/parts/big.nwd/0003'));
+  assert.equal(m.files.get('models/incoming/big.nwd.parts'), '3');
+  assert.ok(!m.files.has('models/incoming/big.nwd'), 'only the marker triggers the workflow');
   const run = await gh.runForCommit(sha);
   assert.equal(run.id, 7);
   assert.equal((await gh.run(7)).conclusion, 'success');
