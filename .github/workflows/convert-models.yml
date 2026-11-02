@@ -178,7 +178,8 @@ jobs:
           OUT: ${{ steps.files.outputs.final }}
         run: |
           mkdir -p models/converted
-          for f in models/incoming/*; do [ -f "$f" ] && git mv -k "$f" models/converted/; done
+          # plain mv (not git mv): files joined from upload parts are untracked and git mv -k would silently leave them behind
+          for f in models/incoming/*; do [ -f "$f" ] && mv -f "$f" models/converted/; done
           touch models/incoming/.gitkeep
           git config user.name "nexus3d-bot"
           git config user.email "nexus3d-bot@users.noreply.github.com"
