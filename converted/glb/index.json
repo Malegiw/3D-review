@@ -32,7 +32,24 @@
       "merged": true,
       "engine": "nwd-reader",
       "converted": "2026-11-02T15:40:40.593Z"
+    },
+    {
+      "name": "WO-133_25092025_UPDATED",
+      "file": "1793638149049-wo-133-25092025-updated.glb",
+      "source": "1793638149049-WO-133_25092025_UPDATED.nwd",
+      "size": 17276256,
+      "units": "m",
+      "zUp": false,
+      "origin": [
+        1516,
+        0,
+        -605
+      ],
+      "objects": 49960,
+      "merged": true,
+      "engine": "nwd-reader",
+      "converted": "2026-11-02T16:50:03.505Z"
     }
   ],
-  "updated": "2026-11-02T15:40:40.604Z"
+  "updated": "2026-11-02T16:50:03.514Z"
 }
