@@ -379,10 +379,10 @@ export class Viewer {
     return box;
   }
   fit(objs, { dir, dur = 0.7 } = {}) {
-    const box = this.boundsOf(objs, { robust: !objs });
+    const box = this.boundsOf(objs, { robust: true }); // a whole imported model must not be framed by its stray objects either
     if (box.isEmpty()) return;
     this._fitBox = objs ? null : box;
-    if (!objs && this.stragglers) this.emit('stragglers', this.stragglers);
+    if (this.stragglers) this.emit('stragglers', this.stragglers);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.length() / 2, 0.5);

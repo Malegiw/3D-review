@@ -127,14 +127,19 @@ export class GitHubRepo {
     if (blob.size <= 8 * 1048576) return this.putFile(`models/incoming/${fileName}`, toBase64(new Uint8Array(await blob.arrayBuffer())), `Convert ${fileName}`);
     // Large file: many small requests (3 MB each) into models/parts/<name>/NNNN — that path does not trigger the workflow.
     // The final tiny marker models/incoming/<name>.parts does; the workflow then joins the parts back into <name>.
+    // Parts already on GitHub with the right size are kept, so a dropped connection costs only the missing parts.
     const PART = 3 * 1024 * 1024;
     const total = Math.ceil(blob.size / PART);
+    const have = new Map((await this.listDir(`models/parts/${fileName}`)).map((f) => [f.name, f.size]));
     try {
       for (let i = 0; i < total; i++) {
-        onProgress?.(i + 1, total);
-        const b64 = toBase64(new Uint8Array(await blob.slice(i * PART, (i + 1) * PART).arrayBuffer()));
+        const name = String(i + 1).padStart(4, '0');
+        const slice = blob.slice(i * PART, (i + 1) * PART);
+        if (have.get(name) === slice.size) { onProgress?.(i + 1, total, { skipped: true }); continue; }
+        onProgress?.(i + 1, total, { skipped: false });
+        const b64 = toBase64(new Uint8Array(await slice.arrayBuffer()));
         for (let attempt = 0; ; attempt++) {
-          try { await this.putFile(`models/parts/${fileName}/${String(i + 1).padStart(4, '0')}`, b64, `Upload ${fileName} part ${i + 1}/${total}`); break; } catch (e) {
+          try { await this.putFile(`models/parts/${fileName}/${name}`, b64, `Upload ${fileName} part ${i + 1}/${total}`); break; } catch (e) {
             if (e.status !== 0 || attempt >= 2) throw e;
             await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
           }
@@ -145,6 +150,15 @@ export class GitHubRepo {
       if (e.status === 0) throw new GitHubError(0, 'Upload to GitHub was interrupted (connection dropped or the device ran out of memory on this large file). Try again on a stable connection, or use “Run workflow” with a download link on GitHub.');
       throw e;
     }
+  }
+
+  /** Files directly inside a repository folder ([] when it does not exist). */
+  async listDir(path) {
+    if (!this.branch) await this.info();
+    try {
+      const r = await this.api(`/repos/${this.owner}/${this.name}/contents/${encPath(path)}?ref=${encodeURIComponent(this.branch)}`);
+      return Array.isArray(r) ? r.filter((f) => f.type === 'file').map((f) => ({ name: f.name, size: f.size })) : [];
+    } catch (e) { if (e.status === 404) return []; throw e; }
   }
 
   async runForCommit(sha) {

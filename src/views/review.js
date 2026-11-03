@@ -180,11 +180,27 @@ export async function renderReview(main, project) {
     for (const f of list) {
       toast(`Uploading ${f.name} (${fmt.bytes(f.size)}) to the converter…`, 'info', 'Converter');
       try {
-        const job = await startConversion(project.id, f);
-        if (job.status === 'failed') toast(job.message, 'err', 'Upload failed');
+        const job = await startConversion(project.id, f, { onExisting: askExisting });
+        if (!job) continue;
+        if (job.existing) toast(`${f.name} was already converted — added from the repository.`, 'ok', 'Model ready');
+        else if (job.status === 'failed') toast(job.message, 'err', 'Upload failed');
         else toast(`${f.name} is converting on GitHub. It appears here automatically when ready — you can keep working.`, 'ok', 'Converting');
       } catch (e) { toast(e.message, 'err'); }
     }
+  }
+  /** A converted copy of this exact file is already in the repository: reuse it, or convert again on purpose. */
+  function askExisting(outs) {
+    return new Promise((resolve) => {
+      const when = outs[0]?.converted ? fmt.date(outs[0].converted) : '';
+      modal({
+        title: 'Already converted', eyebrow: 'Converter',
+        body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+          h('p', { style: { margin: 0 }, class: 'dim2' }, 'This exact file was converted before. Using that result skips the upload and the wait.'),
+          when ? h('p', { class: 'dim', style: { margin: 0 } }, 'Converted ', h('span', { class: 'no-i18n' }, when)) : null),
+        actions: [{ label: 'Convert again', kind: 'ghost', value: 'again' }, { label: 'Use existing result', kind: 'primary', value: 'use' }],
+        onClose: (v) => resolve(v || 'cancel'),
+      });
+    });
   }
   function converterHelp(name) {
     const e = ext(name);
@@ -695,7 +711,8 @@ export async function renderReview(main, project) {
     const ids = e.detail.modelIds || [];
     const meshes = ids.flatMap((id) => viewer.layers.get(id)?.meshes || []);
     viewer.setHud('');
-    viewer.fit(meshes.length ? meshes : null);
+    // first thing in the scene → frame the whole scene (also resizes the grid); otherwise go to the new model
+    viewer.fit(meshes.length && viewer.layers.size > ids.length ? meshes : null);
     if (panel === 'layers') pLayers();
     corner();
   };

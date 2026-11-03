@@ -36,20 +36,48 @@ export async function importOutput(projectId, o) {
   return rec;
 }
 
-export async function startConversion(projectId, file) {
+/** A finished conversion is already in the repository: add it to the project without uploading anything. */
+async function useExisting(projectId, file, outs) {
+  const ids = [];
+  for (const o of outs) ids.push((await importOutput(projectId, o)).id);
+  const job = { id: uid('j'), projectId, file: file.name, status: 'done', step: 'Added from repository', modelIds: ids, existing: true, size: file.size, sizeOut: outs.reduce((n, o) => n + (o.size || 0), 0), created: Date.now() };
+  await save(job);
+  emit('nexus:model-added', { projectId, modelIds: ids });
+  return job;
+}
+
+/**
+ * Upload a native file and queue its conversion. The upload name is derived from the file itself (name + modified time),
+ * so the same file again resumes an interrupted upload and is recognised once converted.
+ * onExisting(outs) → 'use' | 'again' | 'cancel' decides what to do when a converted copy is already in the repository.
+ */
+export async function startConversion(projectId, file, { onExisting } = {}) {
   const gh = await repoClient();
   if (!gh) throw new Error('Set up the converter first.');
   const cfg = await getConverter();
   const ext = (file.name.split('.').pop() || 'nwd').toLowerCase().replace(/[^a-z0-9]/g, '');
   // public repo: random name + client-side AES-256-GCM, so neither the name nor the model is readable on GitHub
   const encrypted = !!cfg?.encrypted;
-  const sourceName = encrypted ? `${Date.now()}-${crypto.getRandomValues(new Uint32Array(2)).join('')}.${ext}` : `${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_')}`;
+  const safe = file.name.replace(/[^\w.-]+/g, '_');
+  const stamp = file.lastModified > 1e12 ? file.lastModified : Date.now();
+  let sourceName = encrypted ? `${Date.now()}-${crypto.getRandomValues(new Uint32Array(2)).join('')}.${ext}` : `${stamp}-${safe}`;
+  if (!encrypted && onExisting) {
+    let outs = [];
+    try { outs = await gh.findOutputs(sourceName); } catch { /* cannot check right now: upload as usual */ }
+    if (outs.length) {
+      const choice = await onExisting(outs);
+      if (choice === 'cancel') return null;
+      if (choice === 'use') return useExisting(projectId, file, outs);
+      sourceName = `${Date.now()}-${safe}`;
+    }
+  }
   const uploadName = encrypted ? `${sourceName}.nxe` : sourceName;
+  for (const old of await projectJobs(projectId)) if (old.uploadName === uploadName && old.status === 'failed') await db.del('jobs', old.id);
   const job = await save({ id: uid('j'), projectId, file: file.name, uploadName, sourceName, encrypted, size: file.size, status: 'uploading', step: encrypted ? 'Encrypting and uploading' : 'Uploading to GitHub', created: Date.now() });
   try {
     if (encrypted && !cfg.key) throw new Error('Encryption key missing on this device — open converter settings.');
     const payload = encrypted ? await encryptBlob(file, cfg.key) : file;
-    job.sha = await gh.uploadModel(payload, uploadName, (i, n) => { job.step = `Uploading part ${i}/${n}`; save(job); });
+    job.sha = await gh.uploadModel(payload, uploadName, (i, n, o) => { job.step = o?.skipped ? `Part ${i}/${n} already on GitHub` : `Uploading part ${i}/${n}`; save(job); });
     Object.assign(job, { status: 'queued', step: 'Waiting for GitHub Actions to start', queuedAt: Date.now() });
   } catch (e) {
     Object.assign(job, { status: 'failed', message: e.message });
@@ -79,7 +107,7 @@ function failureMessage(steps) {
 
 async function advance(gh, job) {
   if (job.status === 'uploading') {
-    if (Date.now() - job.created > 10 * 60000) Object.assign(job, { status: 'failed', message: 'Upload was interrupted. Start the conversion again.' });
+    if (Date.now() - job.created > 10 * 60000) Object.assign(job, { status: 'failed', message: 'Upload was interrupted. Choose the same file again — parts already uploaded are kept.' });
     return save(job);
   }
   if (!job.runId) {

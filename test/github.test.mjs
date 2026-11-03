@@ -21,6 +21,8 @@ function mockGitHub() {
         files.set(path, Buffer.from(body.content, 'base64').toString('utf8'));
         return json({ commit: { sha: 'sha-' + path.split('/').pop() } }, 201);
       }
+      const kids = [...files.keys()].filter((k) => k.startsWith(`${path}/`) && !k.slice(path.length + 1).includes('/'));
+      if (!files.has(path) && kids.length) return json(kids.map((k) => ({ name: k.split('/').pop(), type: 'file', size: Buffer.byteLength(files.get(k)) })));
       if (!files.has(path)) return json({ message: 'Not Found' }, 404);
       if ((opt.headers.Accept || '').includes('raw')) return new Response(files.get(path));
       return json({ sha: 'blob-' + path });
@@ -63,4 +65,25 @@ test('GitHubRepo: check, install, upload, find run, download output', async () =
   assert.equal(await (await gh.download(outs[0].path)).text(), 'GLB!');
   await assert.rejects(() => new GitHubRepo({ repo: 'yan/conv', token: 'tok', fetch: m.fetch }).api('/repos/yan/conv/contents/missing'), /Not Found/);
   assert.throws(() => new GitHubRepo({ repo: 'not a repo', token: 't' }), /owner\/name/);
+});
+
+test('GitHubRepo.uploadModel resumes: parts already on GitHub are not sent again', async () => {
+  const m = mockGitHub();
+  const gh = new GitHubRepo({ repo: 'https://github.com/yan/conv.git', token: 'tok', fetch: m.fetch });
+  const blob = new Blob([new Uint8Array(9 * 1048576)]); // 3 parts of 3 MB
+  await gh.uploadModel(blob, '1-big.nwd');
+  const parts = [...m.files.keys()].filter((k) => k.startsWith('models/parts/1-big.nwd/'));
+  assert.equal(parts.length, 3);
+
+  // connection dropped after part 1: parts 2 and 3 are missing, and a stale half-written part 3 would have the wrong size
+  m.files.delete('models/parts/1-big.nwd/0002');
+  m.files.set('models/parts/1-big.nwd/0003', 'cut short');
+  m.files.delete('models/incoming/1-big.nwd.parts');
+  m.calls.length = 0;
+  const seen = [];
+  await gh.uploadModel(blob, '1-big.nwd', (i, n, o) => seen.push(`${i}/${n}${o?.skipped ? ' skipped' : ''}`));
+  const puts = m.calls.filter((c) => c.startsWith('PUT')).map((c) => decodeURIComponent(c.split('?')[0]).split('/contents/')[1]);
+  assert.deepEqual(puts, ['models/parts/1-big.nwd/0002', 'models/parts/1-big.nwd/0003', 'models/incoming/1-big.nwd.parts']);
+  assert.deepEqual(seen, ['1/3 skipped', '2/3', '3/3']);
+  assert.equal(m.files.get('models/incoming/1-big.nwd.parts'), '3');
 });

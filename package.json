@@ -1,6 +1,6 @@
 {
   "name": "nexus3d-review",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Review 3D by Yan Malegi Diardi — plot plan to 3D, model review, clash & MTO",
   "scripts": {
     "dev": "vite --host",
