@@ -13,8 +13,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { SVFReader, GLTFWriter, TwoLeggedAuthenticationProvider } from 'svf-utils';
 import { NodeIO } from '@gltf-transform/core';
-import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, prune, weld, meshopt } from '@gltf-transform/functions';
+import { ALL_EXTENSIONS, EXTMeshoptCompression } from '@gltf-transform/extensions';
+import { dedup, prune, weld, meshopt, quantize, MESHOPT_DEFAULTS } from '@gltf-transform/functions';
 import { MeshoptEncoder } from 'meshoptimizer';
 
 const BASE = 'https://developer.api.autodesk.com';
@@ -95,13 +95,18 @@ function svfViewables(manifest) {
 }
 
 // ---------- glTF → GLB ----------
-export async function pack(inPath, outPath, { compress = true } = {}) {
+/** keepOrder: compress without meshopt's triangle reordering, for files whose triangle ranges mean something (object lists). */
+export async function pack(inPath, outPath, { compress = true, keepOrder = false } = {}) {
   await MeshoptEncoder.ready;
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
   const doc = await io.read(inPath);
   const steps = [dedup(), weld(), prune()];
-  if (compress) steps.push(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 16 }));
+  if (compress && !keepOrder) steps.push(meshopt({ encoder: MeshoptEncoder, level: 'medium', quantizePosition: 16 }));
   await doc.transform(...steps);
+  if (compress && keepOrder) { // what meshopt() does after its reorder step
+    await doc.transform(quantize({ ...MESHOPT_DEFAULTS, quantizePosition: 16, pattern: /.*/, patternTargets: /.*/ }));
+    doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE });
+  }
   await fsp.mkdir(path.dirname(outPath), { recursive: true });
   await fsp.writeFile(outPath, await io.writeBinary(doc));
   return fs.statSync(outPath).size;

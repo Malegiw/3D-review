@@ -7,6 +7,7 @@ import { h } from '../core/ui.js';
 import { groupVolumeArea } from './mto.js';
 import { view3d, getTheme } from '../core/theme.js';
 import { batchLayer, syncInstance, BATCH_MIN } from './batch.js';
+import { attachObjects, objectAt, objectGeometry, objectName, objectLayer, searchObjects } from './objects.js';
 import { indexLayer, displayName, parseName, toSite } from './groups.js';
 import { MeasureTool } from './measure.js';
 import { robustBounds } from './bounds.js';
@@ -15,7 +16,7 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-const MAT_SEL = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0x00a8c0, emissiveIntensity: 0.9, metalness: 0.1, roughness: 0.35 });
+const MAT_SEL = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0x00a8c0, emissiveIntensity: 0.9, metalness: 0.1, roughness: 0.35, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 const MAT_A = new THREE.MeshStandardMaterial({ color: 0xff3b5c, emissive: 0xff1040, emissiveIntensity: 0.7, roughness: 0.4 });
 const MAT_B = new THREE.MeshStandardMaterial({ color: 0x3dff9a, emissive: 0x10c060, emissiveIntensity: 0.6, roughness: 0.4 });
 const MAT_XRAY = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.05, depthWrite: false });
@@ -79,6 +80,8 @@ export class Viewer {
     this.selected = null;     // primary mesh of the selection (kept for older callers)
     this.selection = [];      // all meshes of the selected component / item
     this.selSet = new Set();
+    this.pickedObj = null;    // { mesh, k }: one object inside a merged block (see objects.js)
+    this._objOverlay = null;
     this.selectRes = 'component'; // part | component | item
     this.mode = 'select';
     this.xray = false;
@@ -182,7 +185,7 @@ export class Viewer {
   addTicker(fn) { this.tickers.add(fn); this.requestRender(); return () => this.tickers.delete(fn); }
 
   // ---------- layers ----------
-  addLayer({ id, name, kind = 'import', object, units = 1, zUp = false, transform = {} }) {
+  addLayer({ id, name, kind = 'import', object, units = 1, zUp = false, transform = {}, objects = null }) {
     this.removeLayer(id);
     const wrap = new THREE.Group();
     const inner = new THREE.Group();
@@ -193,13 +196,20 @@ export class Viewer {
     const meshes = [];
     let i = 0;
     object.updateMatrixWorld(true);
+    let linked = 0;
+    if (objects) { // merged model: blocks know which objects they hold (must happen before the BVH is built)
+      const blocks = [];
+      object.traverse((o) => { if (o.isMesh && !o.userData.helper) blocks.push(o); });
+      linked = attachObjects(blocks, objects);
+    }
     object.traverse((o) => {
       if (!o.isMesh || o.userData.helper) return;
       const g = o.geometry;
       if (!g.attributes.normal) g.computeVertexNormals();
       if (!o.material) o.material = MAT_DEFAULT;
       if (!o.isInstancedMesh && !g.boundsTree && g.attributes.position.count > 2) {
-        try { g.computeBoundsTree(); } catch (e) { console.warn('BVH failed', o.name, e); }
+        // indirect: the triangle order must stay untouched, hit.faceIndex is looked up in the object list
+        try { g.computeBoundsTree(o.userData.objs ? { indirect: true } : undefined); } catch (e) { console.warn('BVH failed', o.name, e); }
       }
       o.userData.layerId = id;
       o.userData.key = `${id}:${i}`;
@@ -209,7 +219,8 @@ export class Viewer {
       i++;
     });
     const { comps, items } = indexLayer(id, meshes);
-    const layer = { id, name, kind, wrap, inner, object, meshes, comps, items, visible: true, units, zUp, origin: object.userData?.nexus?.origin || null, transform: { dx: 0, dy: 0, dz: 0, rotY: 0, ...transform } };
+    const layer = { id, name, kind, wrap, inner, object, meshes, comps, items, objects: linked ? objects : null, objectCount: 0, visible: true, units, zUp, origin: object.userData?.nexus?.origin || null, transform: { dx: 0, dy: 0, dz: 0, rotY: 0, ...transform } };
+    layer.objectCount = meshes.reduce((n, m) => n + (m.userData.objs ? m.userData.objs.nm.length : 1), 0); // single objects, not blocks
     this.layers.set(id, layer);
     this.applyLayerTransform(id);
     if (kind === 'import') {
@@ -289,7 +300,9 @@ export class Viewer {
 
   // ---------- materials / selection ----------
   _look(m) {
-    const hi = this.overrides.get(m) || (this.pickHi.has(m) ? MAT_PICK : null) || (this.selSet.has(m) ? MAT_SEL : null);
+    // a block with one picked object inside is not lit as a whole: the object is drawn on top (overlay)
+    const lit = this.selSet.has(m) && !(this.pickedObj && this.pickedObj.mesh === m);
+    const hi = this.overrides.get(m) || (this.pickHi.has(m) ? MAT_PICK : null) || (lit ? MAT_SEL : null);
     if (m.userData._b) {
       m.material = hi || m.userData.baseMat;
       syncInstance(m, { highlighted: !!hi });
@@ -307,12 +320,37 @@ export class Viewer {
   }
 
   /** Select the component (default), item or part under a mesh; null clears. `add` extends the selection. */
-  select(mesh, { add = false, res } = {}) {
+  select(mesh, { add = false, res, hit = null } = {}) {
+    if (mesh?.userData.objs && hit?.faceIndex != null) return this.selectObject(mesh, objectAt(mesh.userData.objs, hit.faceIndex));
     const group = mesh ? this.groupOf(mesh, res) : [];
     this.selectMeshes(add ? [...new Set([...this.selection, ...group])] : group);
   }
-  selectMeshes(list) {
+  /** Select one object of a merged block. */
+  selectObject(mesh, k) { this.selectMeshes([mesh], { mesh, k }); }
+  /** Meshes to frame / section for the current selection: the picked object itself, else the selected meshes. */
+  selectionTargets() { return this.pickedObj && this._objOverlay ? [this._objOverlay] : this.selection; }
+  /** Matches for a name search in merged models: { total, items: [{ mesh, k, name, layer }] }. */
+  findObjects(q, limit = 60) {
+    const meshes = [];
+    for (const L of this.layers.values()) if (L.objects) meshes.push(...L.meshes);
+    const r = searchObjects(meshes, q, limit);
+    return { total: r.total, items: r.items.map((x) => ({ ...x, name: objectName(x.mesh.userData.objs, x.k), layer: objectLayer(x.mesh.userData.objs, x.k) })) };
+  }
+  _syncOverlay() {
+    if (this._objOverlay) { this._objOverlay.removeFromParent(); this._objOverlay.geometry.dispose(); this._objOverlay = null; }
+    const po = this.pickedObj;
+    if (!po) return;
+    const ov = new THREE.Mesh(objectGeometry(po.mesh, po.k), MAT_SEL);
+    ov.userData.helper = true;
+    ov.raycast = () => {};
+    po.mesh.add(ov);
+    ov.updateWorldMatrix(true, false);
+    this._objOverlay = ov;
+  }
+  selectMeshes(list, obj = null) {
     const prev = this.selection;
+    this.pickedObj = obj;
+    this._syncOverlay();
     this.selection = list.filter(Boolean);
     this.selSet = new Set(this.selection);
     for (const m of prev) this._look(m);
@@ -460,12 +498,12 @@ export class Viewer {
       if (moved > 8 || dt > 650 || e.button > 0) return;
       if (this.mode === 'measure') { this.measure.onTap(e); return; }
       const hit = this.pick(e.clientX, e.clientY);
-      this.select(hit ? hit.object : null, { add: e.shiftKey || e.ctrlKey || e.metaKey });
+      this.select(hit ? hit.object : null, { add: e.shiftKey || e.ctrlKey || e.metaKey, hit });
     });
     el.addEventListener('dblclick', (e) => {
       if (this.mode === 'measure') return;
       const hit = this.pick(e.clientX, e.clientY);
-      if (hit) this.fit(this.groupOf(hit.object));
+      if (hit) this.fit(hit.object.userData.objs && hit.faceIndex != null ? (this.selectObject(hit.object, objectAt(hit.object.userData.objs, hit.faceIndex)), this.selectionTargets()) : this.groupOf(hit.object));
     });
   }
   pick(cx, cy) {
@@ -540,21 +578,25 @@ export class Viewer {
   // ---------- info ----------
   /** Properties of a selection (one or more meshes forming a component / item). */
   info(meshes) {
-    const list = [].concat(meshes).filter(Boolean);
+    const real = [].concat(meshes).filter(Boolean);
+    const po = this.pickedObj && this._objOverlay && real.length === 1 && real[0] === this.pickedObj.mesh ? this.pickedObj : null;
+    const list = po ? [this._objOverlay] : real; // one object of a merged block: measure the object, not its block
     const box = new THREE.Box3();
     let tris = 0;
     for (const m of list) { box.expandByObject(m); tris += (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3; }
     const size = box.getSize(new THREE.Vector3());
     const c = box.getCenter(new THREE.Vector3());
-    const first = list[0];
+    const first = real[0];
     const L = this.layers.get(first?.userData.layerId);
     const va = groupVolumeArea(list);
-    const name = displayName(first);
+    const objs = po ? po.mesh.userData.objs : null;
+    const name = po ? objectName(objs, po.k) : displayName(first);
     const { type, owner } = parseName(name);
     const bottom = toSite(new THREE.Vector3(c.x, box.min.y, c.z), L);
     const top = toSite(new THREE.Vector3(c.x, box.max.y, c.z), L);
     return {
-      name, type, owner, layer: L?.name || '—', source: first?.userData.layer || '', tag: first?.userData.tag, cat: first?.userData.cat,
+      name, type, owner, layer: L?.name || '—', source: po ? objectLayer(objs, po.k) : first?.userData.layer || '', tag: first?.userData.tag, cat: first?.userData.cat,
+      block: po ? { name: displayName(first), objects: objs.nm.length } : null,
       parts: list.length, size, center: toSite(c, L), bottom, top, ...va, tris,
     };
   }

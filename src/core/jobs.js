@@ -28,8 +28,12 @@ export async function importOutput(projectId, o) {
   const enc = o.encrypted || /\.nxe$/i.test(o.file);
   if (enc) blob = await decryptBlob(blob, (await getConverter())?.key);
   const name = o.name || String(o.source || o.file).replace(/^\d{10,}-/, '').replace(/\.[^.]+(\.nxe)?$/i, '');
+  const files = [{ name: o.file.replace(/\.nxe$/i, ''), blob }];
+  if (o.objectsFile && !enc) { // heavy models are merged into blocks; this list keeps the single objects searchable
+    try { files.push({ name: o.objectsFile, blob: await gh.download(`${o.path.slice(0, o.path.lastIndexOf('/'))}/${o.objectsFile}`) }); } catch (e) { console.warn('object list not downloaded', e); }
+  }
   const rec = {
-    id: uid('m'), projectId, name, source: o.source, files: [{ name: o.file.replace(/\.nxe$/i, ''), blob }], units: o.units || 'm', zUp: !!o.zUp,
+    id: uid('m'), projectId, name, source: o.source, files, units: o.units || 'm', zUp: !!o.zUp,
     transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now(),
   };
   await db.put('models', rec);

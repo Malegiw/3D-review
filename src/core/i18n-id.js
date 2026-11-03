@@ -291,6 +291,9 @@ const E = {
   'PDF': 'PDF',
   'No layers yet. Generate a plot plan or import a contractor model.': 'Belum ada layer. Buat plot plan atau import model kontraktor.',
   'Find object': 'Cari objek',
+  'Block': 'Blok',
+  'Isolate block': 'Isolasi blok',
+  'Hide block': 'Sembunyikan blok',
   'Tag or name…': 'Tag atau nama…',
   'Selection': 'Pilihan',
   'Tap an object in the 3D view. Double-tap zooms to it.': 'Tap objek di tampilan 3D. Double-tap untuk zoom ke objek.',
@@ -574,6 +577,7 @@ export const EXACT = new Map(Object.entries(E));
 /** Patterns for sentences built from data. First match wins. */
 export const RULES = [
   [/^Show all \((.+) hidden\)$/, 'Tampilkan semua ($1 tersembunyi)'],
+  [/^([\d,.]+) objects in block$/, '$1 objek dalam blok'],
   [/^(.+) touching contacts ignored$/, '$1 kontak sentuh diabaikan'],
   [/^(.+) open surfaces\.$/, '$1 permukaan terbuka.'],
   [/^(\d[\d,.]*) items$/, '$1 item'],

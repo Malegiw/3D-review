@@ -9,8 +9,9 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { Document, NodeIO } from '@gltf-transform/core';
+import zlib from 'node:zlib';
 import { pack, updateIndex, slug } from './aps-convert.mjs';
+import { mergeRaw, MERGE_ABOVE } from './merge-raw.mjs';
 
 const quiet = !!process.env.NEXUS_QUIET; // public repo: keep model details out of the (public) Actions log
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11, 19)}]`, ...a);
@@ -63,120 +64,7 @@ function runNwd2glb(src, raw) {
   });
 }
 
-// ---------- Heavy models: merge instances into a few thousand chunks ----------
-// A plant model has hundreds of thousands of objects (E3D: 220k objects → 196k tiny meshes). As separate meshes it is
-// 100+ MB of JSON, takes ~40 min to post-process, and is unusable on a tablet (one draw call each). Above MERGE_ABOVE
-// objects the instances are baked into world space and merged per (layer, material, 40 m grid cell). Per-object names are
-// lost; the layer name stays in each chunk's name and extras. Set NWD_MERGE=0 to disable.
-const MERGE_ABOVE = Number(process.env.NWD_MERGE_ABOVE) || 20000;
-const CELL_M = Number(process.env.NWD_CELL_M) || 40;
-const MAX_CHUNKS = Number(process.env.NWD_MAX_CHUNKS) || 3000;
 const MAX_GLB_MB = 95; // GitHub rejects files above 100 MB
-function readGlb(file) {
-  const b = fs.readFileSync(file);
-  const ab = b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); // own, 4-byte aligned copy
-  const dv = new DataView(ab);
-  if (dv.getUint32(0, true) !== 0x46546C67) throw new Error('Not a GLB file');
-  const jl = dv.getUint32(12, true);
-  const json = JSON.parse(Buffer.from(ab, 20, jl).toString('utf8'));
-  const bl = dv.getUint32(20 + jl, true);
-  return { json, bin: ab.slice(28 + jl, 28 + jl + bl) };
-}
-/** raw nwd2glb GLB (one node per object, own mesh each) → merged GLB written to outPath. Returns { chunks, triangles }. */
-function mergeRaw(rawPath, outPath) {
-  const { json, bin } = readGlb(rawPath);
-  const { nodes, meshes, accessors, bufferViews } = json;
-  const view = (ai, Ctor, comps) => { const a = accessors[ai], bv = bufferViews[a.bufferView]; return new Ctor(bin, (bv.byteOffset || 0) + (a.byteOffset || 0), a.count * comps); };
-  // per object: layer, material, normals?, world position of its box centre (x/z), vertex and index counts
-  const info = [];
-  for (let i = 0; i < nodes.length; i++) {
-    const n = nodes[i];
-    if (n.mesh == null || !n.matrix) continue;
-    const prim = meshes[n.mesh].primitives[0];
-    const pa = accessors[prim.attributes.POSITION], ia = accessors[prim.indices];
-    const m = n.matrix, c = [0, 1, 2].map((k) => (pa.min[k] + pa.max[k]) / 2);
-    info.push({ i, layer: n.extras?.layer ?? '', material: prim.material ?? 0, hasN: prim.attributes.NORMAL != null, verts: pa.count, inds: ia.count,
-      wx: m[0] * c[0] + m[4] * c[1] + m[8] * c[2] + m[12], wz: m[2] * c[0] + m[6] * c[1] + m[10] * c[2] + m[14] });
-  }
-  // Start fine (layer × material × 40 m cell); if that gives more than MAX_CHUNKS meshes, drop the layer and/or use larger cells.
-  const keyOf = (o, byLayer, cell) => `${byLayer ? o.layer : ''}\u0001${o.material}\u0001${o.hasN ? 1 : 0}\u0001${Math.floor(o.wx / cell)}\u0001${Math.floor(o.wz / cell)}`;
-  const levels = [[true, CELL_M], [false, CELL_M], [false, CELL_M * 2], [false, CELL_M * 4], [false, CELL_M * 8], [false, CELL_M * 16]];
-  let level = levels.length - 1;
-  for (let l = 0; l < levels.length; l++) {
-    if (new Set(info.map((o) => keyOf(o, levels[l][0], levels[l][1]))).size <= MAX_CHUNKS) { level = l; break; }
-  }
-  const [byLayer, cell] = levels[level];
-  const groups = new Map(), list = [];
-  for (const o of info) {
-    const key = keyOf(o, byLayer, cell);
-    let g = groups.get(key);
-    if (!g) { g = { layer: byLayer ? o.layer : '', material: o.material, hasN: o.hasN, verts: 0, inds: 0, nodes: [] }; groups.set(key, g); list.push(g); }
-    g.verts += o.verts; g.inds += o.inds; g.nodes.push(o.i);
-  }
-  log(`  grouping by ${byLayer ? 'layer · ' : ''}material · ${cell} m cells → ${list.length} chunks`);
-  const doc = new Document();
-  const buffer = doc.createBuffer();
-  const scene = doc.createScene('NWD');
-  const mats = new Map();
-  const material = (mi) => {
-    if (mats.has(mi)) return mats.get(mi);
-    const s = json.materials?.[mi] || {}, p = s.pbrMetallicRoughness || {};
-    const mat = doc.createMaterial(s.name || `NW-${mi}`).setBaseColorFactor(p.baseColorFactor || [0.62, 0.66, 0.72, 1])
-      .setMetallicFactor(p.metallicFactor ?? 0.15).setRoughnessFactor(p.roughnessFactor ?? 0.7).setDoubleSided(!!s.doubleSided);
-    if (s.alphaMode) mat.setAlphaMode(s.alphaMode);
-    mats.set(mi, mat);
-    return mat;
-  };
-  const perLayer = new Map();
-  let triangles = 0;
-  for (const g of list) {
-    const pos = new Float32Array(g.verts * 3), nrm = g.hasN ? new Float32Array(g.verts * 3) : null, idx = new Uint32Array(g.inds);
-    let vo = 0, io = 0;
-    for (const i of g.nodes) {
-      const n = nodes[i], m = n.matrix, prim = meshes[n.mesh].primitives[0];
-      const P = view(prim.attributes.POSITION, Float32Array, 3), I = view(prim.indices, Uint32Array, 1), cnt = P.length / 3;
-      for (let v = 0; v < cnt; v++) {
-        const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2], o = 3 * (vo + v);
-        pos[o] = m[0] * x + m[4] * y + m[8] * z + m[12];
-        pos[o + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
-        pos[o + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
-      }
-      // columns c0,c1,c2 of the 3×3 part: inverse-transpose · n = (n.x·(c1×c2) + n.y·(c2×c0) + n.z·(c0×c1)) / det
-      const a = [m[5] * m[10] - m[6] * m[9], m[6] * m[8] - m[4] * m[10], m[4] * m[9] - m[5] * m[8]];
-      const det = m[0] * a[0] + m[1] * a[1] + m[2] * a[2], flip = det < 0, sgn = flip ? -1 : 1;
-      if (nrm) {
-        const N = view(prim.attributes.NORMAL, Float32Array, 3);
-        const b = [m[9] * m[2] - m[10] * m[1], m[10] * m[0] - m[8] * m[2], m[8] * m[1] - m[9] * m[0]];
-        const c = [m[1] * m[6] - m[2] * m[5], m[2] * m[4] - m[0] * m[6], m[0] * m[5] - m[1] * m[4]];
-        for (let v = 0; v < cnt; v++) {
-          const nx = N[3 * v], ny = N[3 * v + 1], nz = N[3 * v + 2], o = 3 * (vo + v);
-          let x = nx * a[0] + ny * b[0] + nz * c[0], y = nx * a[1] + ny * b[1] + nz * c[1], z = nx * a[2] + ny * b[2] + nz * c[2];
-          const l = Math.hypot(x, y, z) || 1;
-          nrm[o] = sgn * x / l; nrm[o + 1] = sgn * y / l; nrm[o + 2] = sgn * z / l;
-        }
-      }
-      for (let t = 0; t < I.length; t += 3) { // mirrored instances: reverse the winding so faces keep pointing outwards
-        idx[io + t] = I[t] + vo;
-        idx[io + t + 1] = I[t + (flip ? 2 : 1)] + vo;
-        idx[io + t + 2] = I[t + (flip ? 1 : 2)] + vo;
-      }
-      vo += cnt; io += I.length;
-    }
-    const prim = doc.createPrimitive()
-      .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(pos).setBuffer(buffer))
-      .setIndices(doc.createAccessor().setType('SCALAR').setArray(idx).setBuffer(buffer))
-      .setMaterial(material(g.material));
-    if (nrm) prim.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(nrm).setBuffer(buffer));
-    const k = (perLayer.get(g.layer) || 0) + 1;
-    perLayer.set(g.layer, k);
-    const name = `${g.layer || 'Model'} · ${k}`;
-    scene.addChild(doc.createNode(name).setMesh(doc.createMesh(name).addPrimitive(prim)).setExtras({ layer: g.layer, objects: g.nodes.length, merged: true }));
-    triangles += idx.length / 3;
-    g.nodes = null;
-  }
-  if (json.asset?.extras) doc.getRoot().getAsset().extras = { ...json.asset.extras, nexus: { ...json.asset.extras.nexus, merged: true } };
-  return new NodeIO().write(outPath, doc).then(() => ({ chunks: list.length, triangles }));
-}
 
 await fsp.mkdir(outDir, { recursive: true });
 const entries = [];
@@ -192,24 +80,31 @@ for (const src of args) {
     log(`  read in ${mmss((Date.now() - t0) / 1000)}${quiet ? '' : ` · ${report.objects} objects, ${report.triangles} triangles, ${report.sizeMetres.map((v) => v.toFixed(1)).join(' × ')} m`}`);
     const file = `${slug(name)}.glb`;
     const t1 = Date.now();
-    let input = raw, merged = false;
+    let input = raw, merged = false, objects = null;
     if (report.objects > MERGE_ABOVE && process.env.NWD_MERGE !== '0') {
-      log(`  ${quiet ? 'heavy model' : `${report.objects} objects`} → merging into chunks (per-object names are dropped)…`);
+      log(`  ${quiet ? 'heavy model' : `${report.objects} objects`} → merging into chunks (object names are kept in a side file)…`);
       input = path.join(tmp, 'merged.glb');
-      const r = await mergeRaw(raw, input);
-      merged = true;
+      const r = await mergeRaw(raw, input, { log });
+      merged = true; objects = r.objects;
       log(`  merged into ${r.chunks} chunks in ${mmss((Date.now() - t1) / 1000)}`);
     }
     log('  compressing…');
     const t2 = Date.now();
-    const size = await pack(input, path.join(outDir, file), { compress });
+    // merged models: keep triangle order (meshopt's reorder would scramble the per-object ranges)
+    const size = await pack(input, path.join(outDir, file), { compress, keepOrder: merged });
     log(`  compressed in ${mmss((Date.now() - t2) / 1000)}`);
     if (size > MAX_GLB_MB * 1048576) {
       await fsp.rm(path.join(outDir, file), { force: true });
       throw new Error(`The GLB is ${(size / 1048576).toFixed(0)} MB, above the ${MAX_GLB_MB} MB limit for files in a GitHub repository. Export a smaller part of the model (one area or discipline) from Navisworks.`);
     }
+    let objectsFile = null;
+    if (objects) {
+      objectsFile = file.replace(/\.glb$/, '.objects.json.gz');
+      await fsp.writeFile(path.join(outDir, objectsFile), zlib.gzipSync(JSON.stringify(objects), { level: 9 }));
+      log(`  object list → ${objectsFile} (${(fs.statSync(path.join(outDir, objectsFile)).size / 1048576).toFixed(1)} MB, ${objects.names.length} names)`);
+    }
     log(quiet ? '  converted 1 model' : `  → ${file} (${(size / 1048576).toFixed(1)} MB)`);
-    entries.push({ name: name.replace(/^\d{10,}-/, '').replace(/\.[^.]+$/, ''), file, source: name, size, units: 'm', zUp: !!report.zUp, origin: report.origin, objects: report.objects, ...(merged ? { merged: true } : {}), engine: 'nwd-reader', converted: new Date().toISOString() });
+    entries.push({ name: name.replace(/^\d{10,}-/, '').replace(/\.[^.]+$/, ''), file, source: name, size, units: 'm', zUp: !!report.zUp, origin: report.origin, objects: report.objects, ...(merged ? { merged: true, objectsFile } : {}), engine: 'nwd-reader', converted: new Date().toISOString() });
   } catch (e) {
     failed++;
     console.error(`ERROR ${quiet ? 'model' : name}: ${(e.stderr || e.message || e).toString().trim()}`);

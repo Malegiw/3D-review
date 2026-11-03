@@ -9,6 +9,7 @@ import { Viewer } from '../engine/viewer.js';
 import { buildPlotModel } from '../engine/plotbuild.js';
 import { getGround } from '../engine/ground.js';
 import { loadModelFiles, guessUnits, guessZUp, ACCEPT, NATIVE_FORMATS, ext } from '../engine/loaders.js';
+import { readObjects } from '../engine/objects.js';
 import { runClash } from '../engine/clash.js';
 import { runMTO } from '../engine/mto.js';
 import { mtoResult } from './mto-view.js';
@@ -53,7 +54,8 @@ export async function renderReview(main, project) {
           viewer.addLayer({ id, name: w.rec.name, kind: 'plotplan', object: buildPlotModel(w.rec, { groundCanvas: ground }) });
         } else {
           const { object } = await loadModelFiles(w.rec.files);
-          viewer.addLayer({ id, name: w.rec.name, kind: 'import', object, units: UNIT_SCALE[w.rec.units] || 1, zUp: !!w.rec.zUp, transform: w.rec.transform || {} });
+          const objects = await readObjects(w.rec.files); // names of the single objects inside a merged heavy model
+          viewer.addLayer({ id, name: w.rec.name, kind: 'import', object, units: UNIT_SCALE[w.rec.units] || 1, zUp: !!w.rec.zUp, transform: w.rec.transform || {}, objects });
           viewer.setLayerVisible(id, w.rec.visible !== false);
         }
         viewer.layersVer[id] = w.rec.updated;
@@ -67,7 +69,8 @@ export async function renderReview(main, project) {
   }
 
   const corner = () => {
-    const n = viewer.meshes({ visibleOnly: false }).length;
+    let n = 0;
+    for (const L of viewer.layers.values()) n += L.objectCount ?? L.meshes.length;
     viewer.setCorner([['Layers', String(viewer.layers.size)], ['Objects', fmt.int(n)], ['Grid', `${viewer.gridStep ?? '—'} m`], ['Mode', MODE_L[viewer.mode] || viewer.mode]]);
   };
 
@@ -291,6 +294,7 @@ export async function renderReview(main, project) {
         if (!L.items?.size) continue;
         const items = [...L.items.values()];
         if (ql) {
+          if (L.objects) continue; // merged model: its single objects are listed below
           const hits = [];
           for (const c of L.comps.values()) if (c.name.toLowerCase().includes(ql) || (c.owner || '').toLowerCase().includes(ql)) hits.push(c);
           if (!hits.length) continue;
@@ -309,6 +313,18 @@ export async function renderReview(main, project) {
           if (isOpen) for (const ck of it.comps) { const c = L.comps.get(ck); tree.append(row(c.name.replace(/ of .*$/, ''), `${c.meshes.length} part${c.meshes.length > 1 ? 's' : ''}`, c.meshes, `leaf ${ck === selComp ? 'on' : ''}`)); }
         }
         if (items.length > LIMIT) tree.append(h('div', { class: 'tree-more' }, `+${items.length - LIMIT} more — refine the search`));
+      }
+      if (ql) {
+        const found = viewer.findObjects(ql, 60);
+        if (found.total) {
+          const cur = viewer.pickedObj;
+          tree.append(h('div', { class: 'tree-h' }, h('span', {}, 'Objects'), h('small', {}, fmt.int(found.total))));
+          for (const x of found.items) {
+            tree.append(h('button', { class: `hit ${cur && cur.mesh === x.mesh && cur.k === x.k ? 'on' : ''}`, title: x.name, onclick: () => { viewer.selectObject(x.mesh, x.k); viewer.fit(viewer.selectionTargets()); } },
+              h('span', { class: 'tn no-i18n' }, x.name), h('small', { class: 'no-i18n' }, x.layer)));
+          }
+          if (found.total > found.items.length) tree.append(h('div', { class: 'tree-more' }, `+${fmt.int(found.total - found.items.length)} more — refine the search`));
+        }
       }
       if (!tree.childNodes.length) tree.append(h('div', { class: 'tree-more' }, 'No objects.'));
     };
@@ -332,7 +348,7 @@ export async function renderReview(main, project) {
           if (L.kind === 'import') { const r = await db.get('models', L.id); if (r) { r.visible = L.visible; await db.put('models', r); viewer.layersVer[L.id] = r.updated; } }
           pLayers();
         } }, icon(L.visible ? 'eye' : 'eyeoff')),
-        h('div', { class: 'nm' }, h('b', {}, L.name), h('span', {}, `${L.kind === 'plotplan' ? 'Plot plan' : 'Model'} · ${fmt.int(L.meshes.length)} obj${L.kind === 'import' ? ` · ${Object.keys(UNIT_SCALE).find((k) => UNIT_SCALE[k] === L.units) || ''}` : ''}`)),
+        h('div', { class: 'nm' }, h('b', {}, L.name), h('span', {}, `${L.kind === 'plotplan' ? 'Plot plan' : 'Model'} · ${fmt.int(L.objectCount ?? L.meshes.length)} obj${L.kind === 'import' ? ` · ${Object.keys(UNIT_SCALE).find((k) => UNIT_SCALE[k] === L.units) || ''}` : ''}`)),
         L.kind === 'import' ? h('div', { class: 'btn-row', style: { flexWrap: 'nowrap', gap: '4px' } },
           h('button', { class: 'btn sm icon ghost', 'aria-label': 'Layer settings', onclick: () => layerSettings(L) }, icon('gear')),
           h('button', { class: 'btn sm icon ghost', 'aria-label': 'Centre on origin', title: 'Centre on plot plan origin', onclick: () => centerLayer(L) }, icon('target')),
@@ -358,15 +374,18 @@ export async function renderReview(main, project) {
     const showAllBtn = hidden ? h('button', { class: 'btn sm ghost', onclick: () => { viewer.showAll(); renderPanel(); } }, icon('eye'), `Show all (${fmt.int(hidden)} hidden)`) : null;
     if (!sel.length) return shell('Properties', 'Selection', h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Select by'), resSeg()), h('p', { class: 'dim2', style: { margin: 0 } }, 'Tap an object in the 3D view. Double-tap zooms to it. Shift/Ctrl-click adds to the selection.'), showAllBtn ? h('div', { class: 'btn-row' }, showAllBtn) : null);
     const i = viewer.info(sel);
+    const one = !!i.block; // a single object inside a merged block
+    const targets = viewer.selectionTargets();
     const comp = viewer.selected.userData.comp || viewer.selected.userData.key;
     const mtoMat = project.mtoMat?.[comp] || project.mtoMat?.[viewer.selected.userData.key] || viewer.selected.userData.material || guessMaterial(i.name, i.cat);
     const n3 = (x) => fmt.num(x, 3);
-    shell(viewer.selectRes === 'item' && i.owner ? i.owner : i.name, 'Properties',
-      h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Select by'), resSeg()),
+    shell(!one && viewer.selectRes === 'item' && i.owner ? i.owner : i.name, 'Properties',
+      one ? null : h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Select by'), resSeg()),
       h('dl', { class: 'kv' },
         i.type ? [h('dt', {}, 'Type'), h('dd', { class: 'no-i18n' }, i.type)] : null,
         i.owner ? [h('dt', {}, 'Item'), h('dd', { class: 'no-i18n' }, i.owner)] : null,
         h('dt', {}, 'Layer'), h('dd', { class: 'no-i18n' }, i.layer),
+        i.block ? [h('dt', {}, 'Block'), h('dd', {}, h('span', { class: 'no-i18n' }, i.block.name), h('small', { style: { marginLeft: '6px' } }, `${fmt.int(i.block.objects)} objects in block`))] : null,
         i.source && i.source !== i.name ? [h('dt', {}, 'Source'), h('dd', { class: 'no-i18n' }, i.source)] : null,
         i.cat ? [h('dt', {}, 'Category'), h('dd', {}, CATS[i.cat]?.label || i.cat)] : null,
         h('dt', {}, 'Parts'), h('dd', {}, fmt.int(i.parts)),
@@ -376,15 +395,15 @@ export async function renderReview(main, project) {
         h('dt', {}, 'Volume'), h('dd', {}, i.closed ? `${n3(i.volume)} m³` : h('span', { class: 'dim2' }, 'open surface — no volume')),
         h('dt', {}, 'Surface'), h('dd', {}, `${fmt.num(i.area, 2)} m²`),
         h('dt', {}, 'Triangles'), h('dd', {}, fmt.int(i.tris))),
-      h('div', { class: 'field' }, h('label', { for: 'mm' }, 'MTO material'), h('select', { class: 'inp', id: 'mm', onchange: async (e) => {
+      one ? null : h('div', { class: 'field' }, h('label', { for: 'mm' }, 'MTO material'), h('select', { class: 'inp', id: 'mm', onchange: async (e) => {
         project.mtoMat = { ...(project.mtoMat || {}), [comp]: e.target.value };
         await db.put('projects', project);
       } }, Object.entries(MATERIALS).map(([k, v]) => h('option', { value: k, selected: k === mtoMat }, v.label)))),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn sm', onclick: () => viewer.fit(sel) }, icon('focus'), 'Zoom'),
-        h('button', { class: 'btn sm ghost', onclick: () => { viewer.isolate(sel); renderPanel(); } }, 'Isolate'),
-        h('button', { class: 'btn sm ghost', onclick: () => { viewer.setVisible(sel, false); renderPanel(); } }, icon('eyeoff'), 'Hide'),
-        h('button', { class: 'btn sm ghost', onclick: () => { const b = viewer.boundsOf(sel); b.expandByScalar(Math.max(0.5, b.getSize(new THREE.Vector3()).length() * 0.15)); viewer.setSection(true, b); viewer.fit(sel); toast('Section box set around the selection.', 'ok'); } }, icon('section'), 'Section'),
+        h('button', { class: 'btn sm', onclick: () => viewer.fit(targets) }, icon('focus'), 'Zoom'),
+        h('button', { class: 'btn sm ghost', onclick: () => { viewer.isolate(sel); renderPanel(); } }, one ? 'Isolate block' : 'Isolate'),
+        h('button', { class: 'btn sm ghost', onclick: () => { viewer.setVisible(sel, false); renderPanel(); } }, icon('eyeoff'), one ? 'Hide block' : 'Hide'),
+        h('button', { class: 'btn sm ghost', onclick: () => { const b = viewer.boundsOf(targets); b.expandByScalar(Math.max(0.5, b.getSize(new THREE.Vector3()).length() * 0.15)); viewer.setSection(true, b); viewer.fit(targets); toast('Section box set around the selection.', 'ok'); } }, icon('section'), 'Section'),
         showAllBtn));
   }
   offs.push(viewer.on('select', () => { if (panel === 'info' || panel === 'layers') renderPanel(); else if (viewer.selected && window.innerWidth > 760 && !panel) openPanel('info'); }));
