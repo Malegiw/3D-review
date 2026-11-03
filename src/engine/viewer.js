@@ -9,6 +9,7 @@ import { view3d, getTheme } from '../core/theme.js';
 import { batchLayer, syncInstance, BATCH_MIN } from './batch.js';
 import { indexLayer, displayName, parseName, toSite } from './groups.js';
 import { MeasureTool } from './measure.js';
+import { robustBounds } from './bounds.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -365,15 +366,23 @@ export class Viewer {
   hiddenCount() { let n = 0; for (const L of this.layers.values()) for (const m of L.meshes) if (!m.visible) n++; return n; }
 
   // ---------- camera ----------
-  boundsOf(objs) {
-    const box = new THREE.Box3();
+  // robust: ignore stragglers (objects far from the main cluster) so one stray object cannot push the camera kilometres away
+  boundsOf(objs, { robust = false } = {}) {
     const list = objs ? (Array.isArray(objs) ? objs : [objs]) : this.meshes();
+    if (robust) {
+      const r = robustBounds(list.map((o) => new THREE.Box3().expandByObject(o)));
+      this.stragglers = r.dropped;
+      return r.box;
+    }
+    const box = new THREE.Box3();
     for (const o of list) box.expandByObject(o);
     return box;
   }
   fit(objs, { dir, dur = 0.7 } = {}) {
-    const box = this.boundsOf(objs);
+    const box = this.boundsOf(objs, { robust: !objs });
     if (box.isEmpty()) return;
+    this._fitBox = objs ? null : box;
+    if (!objs && this.stragglers) this.emit('stragglers', this.stragglers);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.length() / 2, 0.5);
@@ -430,7 +439,7 @@ export class Viewer {
     const minor = new THREE.GridHelper(n * step, n, p.gridMinor, p.gridMinor);
     const major = new THREE.GridHelper(n * step, Math.max(1, Math.round(n / 5)), p.gridMajor, p.gridMajor);
     [minor, major].forEach((g, i) => { g.material.transparent = true; g.material.opacity = p.gridOpacity[i]; g.material.depthWrite = false; g.position.y = y - 0.02 - i * 0.001; g.userData.helper = true; this.grid.add(g); });
-    const c = this.boundsOf().getCenter(new THREE.Vector3());
+    const c = (this._fitBox || this.boundsOf(null, { robust: true })).getCenter(new THREE.Vector3());
     if (isFinite(c.x)) this.grid.position.set(Math.round(c.x / step) * step, 0, Math.round(c.z / step) * step);
     this.gridStep = step;
     this.requestRender();

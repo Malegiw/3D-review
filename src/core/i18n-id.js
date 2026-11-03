@@ -577,6 +577,7 @@ export const RULES = [
   [/^Clearance (.+) mm$/, 'Clearance $1 mm'],
   [/^(\d[\d,.]*) clashes · (\d[\d,.]*) pairs · (.+) s$/, '$1 clash · $2 pasangan · $3 detik'],
   [/^(\d[\d,.]*) open meshes\.$/, '$1 mesh terbuka.'],
+  [/^Ignored (\d+) far-away objects? when framing the view\.$/, 'Mengabaikan $1 objek yang jauh dari area utama saat membingkai tampilan.'],
   [/^Largest items · (.+) total$/, 'Item terbesar · total $1'],
   [/^Video saved \((.+)\)\.$/, 'Video tersimpan ($1).'],
   [/^Failed at “(.+)”\. Open the run on GitHub for the log\.$/, 'Gagal di langkah “$1”. Buka run di GitHub untuk melihat log.'],

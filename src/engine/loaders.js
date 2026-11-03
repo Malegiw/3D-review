@@ -89,6 +89,8 @@ export async function loadModelFiles(files) {
 
 /** Units guess from raw extents: plant models > 3 km across are almost certainly millimetres. */
 export function guessUnits(object) {
+  const declared = object.userData?.nexus?.units; // written by the converter — always right, unlike a size guess
+  if (declared === 'm' || declared === 'mm') return declared;
   const s = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
   const m = Math.max(s.x, s.y, s.z);
   if (m > 3000) return 'mm';

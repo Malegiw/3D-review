@@ -85,3 +85,22 @@ test('XLSX writer produces a valid workbook; CSV parser handles ; and quotes', (
     assert.equal(rows[1]['doc no'], 'B-02');
   });
 });
+
+test('robustBounds: one far-away straggler does not decide the framing', async () => {
+  const { robustBounds } = await import('../src/engine/bounds.js');
+  const rnd = (() => { let s = 7; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); })();
+  const plant = Array.from({ length: 300 }, () => { const x = rnd() * 236, z = rnd() * 24, y = rnd() * 20; return new THREE.Box3(new THREE.Vector3(x, y, z), new THREE.Vector3(x + 2, y + 2, z + 2)); });
+  const far = new THREE.Box3(new THREE.Vector3(100, 0, 168000), new THREE.Vector3(102, 2, 168002));
+  const plain = robustBounds(plant);
+  const withFar = robustBounds([...plant, far, far.clone()]);
+  assert.equal(withFar.dropped, 2);
+  assert.ok(withFar.box.max.z < 100, `framing stays on the plant, max z ${withFar.box.max.z}`);
+  assert.ok(Math.abs(withFar.box.max.x - plain.box.max.x) < 1e-9 && Math.abs(withFar.box.max.z - plain.box.max.z) < 1e-9, 'same box as the plant alone');
+  // a scene that is genuinely spread out (20% far) keeps everything
+  const spread = [...plant, ...Array.from({ length: 80 }, (_, i) => new THREE.Box3(new THREE.Vector3(0, 0, 5000 + i * 100), new THREE.Vector3(2, 2, 5002 + i * 100)))];
+  const r = robustBounds(spread);
+  assert.equal(r.dropped, 0);
+  assert.ok(r.box.max.z > 12000);
+  assert.equal(robustBounds([]).dropped, 0, 'empty is fine');
+  assert.equal(robustBounds(plant.slice(0, 5)).dropped, 0, 'few objects: no trimming');
+});

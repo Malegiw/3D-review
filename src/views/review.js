@@ -372,6 +372,8 @@ export async function renderReview(main, project) {
   }
   offs.push(viewer.on('select', () => { if (panel === 'info' || panel === 'layers') renderPanel(); else if (viewer.selected && window.innerWidth > 760 && !panel) openPanel('info'); }));
   offs.push(viewer.on('visibility', () => { if (panel === 'info') renderPanel(); }));
+  let strayShown = 0;
+  offs.push(viewer.on('stragglers', (n) => { if (n !== strayShown) { strayShown = n; toast(`Ignored ${n} far-away object${n === 1 ? '' : 's'} when framing the view.`, 'info'); } }));
 
   // ---------- Measure ----------
   const M = viewer.measure;
