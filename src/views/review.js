@@ -11,6 +11,7 @@ import { getGround } from '../engine/ground.js';
 import { loadModelFiles, guessUnits, guessZUp, ACCEPT, NATIVE_FORMATS, ext } from '../engine/loaders.js';
 import { runClash } from '../engine/clash.js';
 import { runMTO } from '../engine/mto.js';
+import { mtoResult } from './mto-view.js';
 import { playBuildUp, playOrbit, playTour } from '../engine/motion.js';
 import { NATIVE_EXT, getConverter, startConversion, projectJobs, retryJob, removeJob, repoClient, importOutput } from '../core/jobs.js';
 import { openConverterSetup } from './converter-setup.js';
@@ -561,66 +562,66 @@ export async function renderReview(main, project) {
 
   // ---------- MTO ----------
   let lastMTO = null;
+  function exportMTO() {
+    if (!lastMTO) return toast('Run the calculation first.', 'warn');
+    const blob = buildXlsx([{
+      name: 'MTO', title: `${project.code || ''} ${project.name} — Material Take-Off from 3D (${fmt.date(fmt.today())})`,
+      columns: [
+        { header: 'No', key: (r) => lastMTO.rows.indexOf(r) + 1, type: 'n', dp: 0, width: 6 }, { header: 'Layer', key: 'layer', width: 24 }, { header: 'Object / Tag', key: 'name', width: 40 }, { header: 'Parts', key: 'parts', type: 'n', dp: 0, width: 7 },
+        { header: 'Category', key: (r) => CATS[r.cat]?.label || '', width: 18 }, { header: 'Material', key: (r) => MATERIALS[r.material]?.label, width: 14 },
+        { header: 'L (m)', key: 'L', type: 'n', width: 9 }, { header: 'W (m)', key: 'W', type: 'n', width: 9 }, { header: 'H (m)', key: 'H', type: 'n', width: 9 },
+        { header: 'Area (m²)', key: 'area', type: 'n', width: 11 }, { header: 'Volume (m³)', key: 'volume', type: 'n', dp: 3, width: 12 },
+        { header: 'Density (kg/m³)', key: 'density', type: 'n', dp: 0, width: 14 }, { header: 'Weight (kg)', key: 'weight', type: 'n', dp: 0, width: 12 },
+        { header: 'Closed solid', key: (r) => (r.closed ? 'YES' : 'NO – area only'), width: 15 },
+      ],
+      rows: lastMTO.rows,
+    }, {
+      name: 'Summary', title: 'Summary by material',
+      columns: [{ header: 'Material', key: (s) => MATERIALS[s.material]?.label, width: 22 }, { header: 'Components', key: 'count', type: 'n', dp: 0, width: 12 }, { header: 'Volume (m³)', key: 'volume', type: 'n', dp: 3, width: 13 }, { header: 'Area (m²)', key: 'area', type: 'n', width: 13 }, { header: 'Weight (t)', key: (s) => s.weight / 1000, type: 'n', dp: 3, width: 12 }, { header: 'Open meshes', key: 'open', type: 'n', dp: 0, width: 12 }],
+      rows: lastMTO.summary,
+    }]);
+    download(blob, `${(project.code || 'project').replace(/[^\w-]+/g, '_')}_MTO_${fmt.today()}.xlsx`);
+  }
   function pMTO() {
     const dens = { concrete: 2400, steel: 7850, ...(project.densities || {}) };
     const layers = [...viewer.layers.values()];
     let scope = 'all';
     const prog = h('div', { class: 'progress', hidden: true }, h('i'));
-    const out = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } });
+    const out = h('div', { class: 'mto' });
     const draw = () => {
-      out.innerHTML = '';
-      if (!lastMTO) return;
-      const { rows, summary } = lastMTO;
-      const SHORT = { concrete: 'CONC', steel: 'STL', other: 'OTH' };
-      out.append(...[h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'Material'), h('th', { class: 'num' }, 'Qty'), h('th', { class: 'num' }, 'Vol m³'), h('th', { class: 'num' }, 'Weight t'))),
-        h('tbody', {}, summary.map((s) => h('tr', {}, h('td', {}, h('span', { class: 'chip dot', style: { '--c': MATERIALS[s.material]?.color } }, SHORT[s.material] || s.material)),
-          h('td', { class: 'num' }, s.count), h('td', { class: 'num' }, fmt.num(s.volume, 3)), h('td', { class: 'num' }, s.weight ? fmt.num(s.weight / 1000, 2) : '—')))))),
-      summary.some((s) => s.open) ? h('div', { class: 'note' }, h('b', {}, `${fmt.int(summary.reduce((n, s) => n + s.open, 0))} open surfaces. `), 'They have no enclosed volume (single-sided panels, pipe walls without ends), so only their area is counted.') : null,
-      h('div', { class: 'lbl' }, `Largest items · ${fmt.int(rows.length)} total`),
-      h('div', { class: 'clist' }, rows.slice().sort((a, b) => b.volume - a.volume).slice(0, 60).map((r) => h('div', { class: 'citem', onclick: () => { const m = viewer.findByKey(r.key); if (m) { viewer.select(m, { res: 'component' }); viewer.fit(viewer.selection); } } },
-        h('span', { class: 'chip', style: { '--c': MATERIALS[r.material]?.color } }, SHORT[r.material] || r.material),
-        h('div', { class: 'nm' }, h('span', { class: 'no-i18n' }, r.name), h('small', {}, `${fmt.num(r.L)}×${fmt.num(r.W)}×${fmt.num(r.H)} m${r.closed ? '' : ' · open'}`)),
-        h('span', { class: 'mono', style: { fontSize: '12px' } }, `${fmt.num(r.volume, 3)} m³`))))].filter(Boolean));
+      out.replaceChildren();
+      if (lastMTO) {
+        out.append(mtoResult(lastMTO, {
+          onExport: exportMTO,
+          onPick: (r) => { const m = viewer.findByKey(r.key); if (m) { viewer.select(m, { res: 'component' }); viewer.fit(viewer.selection); } },
+        }));
+      } else {
+        out.append(h('div', { class: 'mto-empty' }, icon('calc'), h('p', {}, 'Calculates the volume and weight of concrete and steel from the 3D model, per object and per layer.')));
+      }
     };
-    shell('MTO quantities', 'Material take-off',
-      h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr 1fr' } },
-        h('div', { class: 'field', style: { gridColumn: '1 / -1' } }, h('label', { for: 'ms' }, 'Scope'), h('select', { class: 'inp', id: 'ms', onchange: (e) => { scope = e.target.value; } }, h('option', { value: 'all' }, 'All visible objects'), layers.map((L) => h('option', { value: L.id }, L.name)))),
-        h('div', { class: 'field' }, h('label', { for: 'dc' }, 'Concrete kg/m³'), h('input', { class: 'inp mono', id: 'dc', type: 'number', value: dens.concrete, oninput: (e) => { dens.concrete = Number(e.target.value); } })),
-        h('div', { class: 'field' }, h('label', { for: 'dsx' }, 'Steel kg/m³'), h('input', { class: 'inp mono', id: 'dsx', type: 'number', value: dens.steel, oninput: (e) => { dens.steel = Number(e.target.value); } }))),
-      h('div', { class: 'btn-row' },
-        h('button', { class: 'btn primary', onclick: async (e) => {
-          const btn = e.currentTarget;
-          btn.disabled = true; prog.hidden = false;
-          project.densities = dens; await db.put('projects', project);
-          const meshes = scope === 'all' ? viewer.meshes() : viewer.meshes({ layerIds: [scope] });
-          try {
-            lastMTO = await runMTO(meshes, { densities: dens, overrides: new Map(Object.entries(project.mtoMat || {})), layerName: (id) => viewer.layers.get(id)?.name || id, onProgress: (p) => { prog.firstChild.style.width = `${p * 100}%`; } });
-            draw();
-          } finally { btn.disabled = false; prog.hidden = true; }
-        } }, icon('calc'), 'Calculate'),
-        h('button', { class: 'btn ghost', onclick: () => {
-          if (!lastMTO) return toast('Run the calculation first.', 'warn');
-          const blob = buildXlsx([{
-            name: 'MTO', title: `${project.code || ''} ${project.name} — Material Take-Off from 3D (${fmt.date(fmt.today())})`,
-            columns: [
-              { header: 'No', key: (r) => lastMTO.rows.indexOf(r) + 1, type: 'n', dp: 0, width: 6 }, { header: 'Layer', key: 'layer', width: 24 }, { header: 'Object / Tag', key: 'name', width: 40 }, { header: 'Parts', key: 'parts', type: 'n', dp: 0, width: 7 },
-              { header: 'Category', key: (r) => CATS[r.cat]?.label || '', width: 18 }, { header: 'Material', key: (r) => MATERIALS[r.material]?.label, width: 14 },
-              { header: 'L (m)', key: 'L', type: 'n', width: 9 }, { header: 'W (m)', key: 'W', type: 'n', width: 9 }, { header: 'H (m)', key: 'H', type: 'n', width: 9 },
-              { header: 'Area (m²)', key: 'area', type: 'n', width: 11 }, { header: 'Volume (m³)', key: 'volume', type: 'n', dp: 3, width: 12 },
-              { header: 'Density (kg/m³)', key: 'density', type: 'n', dp: 0, width: 14 }, { header: 'Weight (kg)', key: 'weight', type: 'n', dp: 0, width: 12 },
-              { header: 'Closed solid', key: (r) => (r.closed ? 'YES' : 'NO – area only'), width: 15 },
-            ],
-            rows: lastMTO.rows,
-          }, {
-            name: 'Summary', title: 'Summary by material',
-            columns: [{ header: 'Material', key: (s) => MATERIALS[s.material]?.label, width: 22 }, { header: 'Components', key: 'count', type: 'n', dp: 0, width: 12 }, { header: 'Volume (m³)', key: 'volume', type: 'n', dp: 3, width: 13 }, { header: 'Area (m²)', key: 'area', type: 'n', width: 13 }, { header: 'Weight (t)', key: (s) => s.weight / 1000, type: 'n', dp: 3, width: 12 }, { header: 'Open meshes', key: 'open', type: 'n', dp: 0, width: 12 }],
-            rows: lastMTO.summary,
-          }]);
-          download(blob, `${(project.code || 'project').replace(/[^\w-]+/g, '_')}_MTO_${fmt.today()}.xlsx`);
-        } }, icon('download'), 'XLSX')),
+    const run = async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true; prog.hidden = false; prog.firstChild.style.width = '0%';
+      project.densities = dens; await db.put('projects', project);
+      const meshes = scope === 'all' ? viewer.meshes() : viewer.meshes({ layerIds: [scope] });
+      try {
+        lastMTO = await runMTO(meshes, { densities: dens, overrides: new Map(Object.entries(project.mtoMat || {})), layerName: (id) => viewer.layers.get(id)?.name || id, onProgress: (p) => { prog.firstChild.style.width = `${p * 100}%`; } });
+        draw();
+      } finally { btn.disabled = false; prog.hidden = true; }
+    };
+    shell('Quantities', 'Material take-off',
+      h('div', { class: 'field' }, h('label', { for: 'ms' }, 'Scope'),
+        h('select', { class: 'inp', id: 'ms', onchange: (e) => { scope = e.target.value; } }, h('option', { value: 'all' }, 'All visible objects'), layers.map((L) => h('option', { value: L.id }, L.name)))),
+      h('details', { class: 'mto-set' }, h('summary', {}, 'Density (kg/m³)'),
+        h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr 1fr' } },
+          h('div', { class: 'field' }, h('label', { for: 'dc' }, 'Concrete'), h('input', { class: 'inp mono', id: 'dc', type: 'number', value: dens.concrete, oninput: (e) => { dens.concrete = Number(e.target.value); } })),
+          h('div', { class: 'field' }, h('label', { for: 'dsx' }, 'Steel'), h('input', { class: 'inp mono', id: 'dsx', type: 'number', value: dens.steel, oninput: (e) => { dens.steel = Number(e.target.value); } })))),
+      h('button', { class: 'btn primary', style: { width: '100%' }, onclick: run }, icon('calc'), 'Calculate quantities'),
       prog, out,
-      h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'Volumes from closed triangle meshes (divergence theorem). Plot plan tanks, vessels, equipment and buildings are envelopes (space, not material), so they count as Other; foundations, paving and bund walls count as concrete. Contractor objects are classified by name; override any object in Properties.'));
+      h('details', { class: 'mto-how' }, h('summary', {}, 'How to read the result'),
+        h('p', {}, 'Volumes come from closed triangle meshes (divergence theorem); weight = volume × density.'),
+        h('p', {}, 'Plot plan tanks, vessels, equipment and buildings are envelopes (space, not material), so they count as Other. Foundations, paving and bund walls count as concrete.'),
+        h('p', {}, 'Contractor objects are classified by name. Change any object in Properties.')));
     draw();
   }
 
