@@ -2,7 +2,8 @@ import { h, icon, toast, formDialog, pickFiles, fmt } from '../core/ui.js';
 import { db } from '../core/db.js';
 import { docStats, PHASES } from '../core/domain.js';
 import { importProject } from '../core/store.js';
-import { VERSION, COPYRIGHT, go, projectRoute } from '../core/app.js';
+import { go, projectRoute } from '../core/app.js';
+import { coverArt } from './cover-art.js';
 
 export async function projectDialog(p = {}) {
   return formDialog({
@@ -21,56 +22,68 @@ export async function projectDialog(p = {}) {
   });
 }
 
+async function newProject() {
+  const v = await projectDialog();
+  if (!v) return;
+  const p = await db.put('projects', { id: `p${Date.now().toString(36)}`, ...v, created: Date.now() });
+  go(projectRoute(p.id));
+}
+
+async function restoreBackup() {
+  const [f] = await pickFiles({ accept: '.zip' });
+  if (!f) return;
+  try { const pid = await importProject(f); toast('Backup restored.', 'ok'); go(projectRoute(pid)); } catch (e) { toast(e.message, 'err'); }
+}
+
+function card(p, { st, openClash, plans, models }) {
+  const dates = p.start || p.finish ? `${fmt.date(p.start)} → ${fmt.date(p.finish)}` : null;
+  const stat = (n, label, tone) => h('span', { class: `st ${tone || ''}` }, h('b', {}, n), h('em', {}, label));
+  return h('a', { class: 'hcard', href: `#${projectRoute(p.id)}` },
+    h('div', { class: 'cover' },
+      p.thumb ? h('img', { src: p.thumb, alt: '', loading: 'lazy' }) : coverArt(),
+      h('div', { class: 'tags' },
+        p.sample ? h('span', { class: 'chip glass', style: { '--c': 'var(--yellow)' } }, 'Sample') : null,
+        p.phase ? h('span', { class: 'chip glass dot', style: { '--c': 'var(--cyan)' } }, p.phase) : null)),
+    h('div', { class: 'hbody' },
+      h('span', { class: 'code' }, p.code || '—'),
+      h('h2', {}, p.name),
+      h('p', { class: 'meta' }, [p.facility, dates].filter(Boolean).join('  ·  ') || '—'),
+      h('div', { class: 'hprog' },
+        h('div', { class: 'bar' }, h('i', { style: { width: `${st.progress}%` } })),
+        h('span', {}, fmt.pct(st.progress))),
+      h('div', { class: 'hstats' },
+        stat(st.total, 'Docs'),
+        stat(st.overdue, 'Overdue', st.overdue ? 'warn' : ''),
+        stat(openClash, 'Open clash', openClash ? 'alert' : '')),
+      h('p', { class: 'meta small' }, `${plans} plot plan · ${models} model${models === 1 ? '' : 's'}`)));
+}
+
 export async function renderHome(main) {
-  const page = h('div', { class: 'page' });
+  const page = h('div', { class: 'page home' });
   main.append(page);
   const projects = (await db.all('projects')).sort((a, b) => (b.updated || 0) - (a.updated || 0));
   const cards = [];
   for (const p of projects) {
     const [docs, models, plans, tests] = await Promise.all([db.byProject('deliverables', p.id), db.byProject('models', p.id), db.byProject('plotplans', p.id), db.byProject('clashtests', p.id)]);
-    const st = docStats(docs);
     const openClash = tests.reduce((n, t) => n + (t.results || []).filter((r) => r.status !== 'Resolved' && r.status !== 'Approved').length, 0);
-    cards.push(h('article', { class: 'panel pcard', tabindex: 0, onclick: () => go(projectRoute(p.id)), onkeydown: (e) => e.key === 'Enter' && go(projectRoute(p.id)) },
-      h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' } },
-        h('span', { class: 'code' }, p.code || '—'),
-        h('span', { style: { display: 'flex', gap: '6px' } }, p.sample ? h('span', { class: 'chip', style: { '--c': 'var(--yellow)' } }, 'Sample') : null, h('span', { class: 'chip dot', style: { '--c': 'var(--cyan)' } }, p.phase || '—'))),
-      h('h2', {}, p.name),
-      h('div', { class: 'meta' }, h('span', {}, p.facility || '—'), h('span', {}, `${fmt.date(p.start)} → ${fmt.date(p.finish)}`)),
-      h('div', {}, h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }, class: 'mono dim' }, h('span', {}, 'Deliverable progress'), h('span', { class: 'neon-c' }, fmt.pct(st.progress))),
-        h('div', { class: 'bar' }, h('i', { style: { width: `${st.progress}%` } }))),
-      h('div', { class: 'stats' },
-        h('div', {}, h('b', {}, st.total), h('span', {}, 'Docs')),
-        h('div', {}, h('b', { style: { color: st.overdue ? 'var(--red)' : null } }, st.overdue), h('span', {}, 'Overdue')),
-        h('div', {}, h('b', { style: { color: openClash ? 'var(--magenta)' : null } }, openClash), h('span', {}, 'Open clash'))),
-      h('div', { class: 'meta' }, h('span', {}, `${plans.length} plot plan · ${models.length} model${models.length === 1 ? '' : 's'}`))));
+    cards.push(card(p, { st: docStats(docs), openClash, plans: plans.length, models: models.length }));
+  }
+
+  if (!projects.length) {
+    page.append(h('div', { class: 'hempty' },
+      coverArt(),
+      h('h1', {}, 'No projects yet'),
+      h('p', {}, 'Create a project, then add its deliverable list, plot plan PDF and contractor models.'),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'btn primary', onclick: newProject }, icon('plus'), 'New project'),
+        h('button', { class: 'btn ghost', onclick: restoreBackup }, icon('upload'), 'Restore backup'))));
+    return;
   }
 
   page.append(
-    h('div', { class: 'page-head' },
-      h('div', {}, h('div', { class: 'eyebrow' }, 'Project grid'), h('h1', {}, 'Facility projects'), h('p', { class: 'dim2', style: { margin: 0, maxWidth: '62ch' } }, 'Turn 2D plot plans into 3D, review contractor models, run clash checks and MTO, and keep every deliverable on track.')),
-      h('div', { class: 'btn-row' },
-        h('button', { class: 'btn ghost', onclick: async () => {
-          const [f] = await pickFiles({ accept: '.zip' });
-          if (!f) return;
-          try { const pid = await importProject(f); toast('Backup restored.', 'ok'); go(projectRoute(pid)); } catch (e) { toast(e.message, 'err'); }
-        } }, icon('upload'), 'Restore backup'),
-        h('button', { class: 'btn primary', onclick: async () => {
-          const v = await projectDialog();
-          if (!v) return;
-          const p = await db.put('projects', { id: `p${Date.now().toString(36)}`, ...v, created: Date.now() });
-          go(projectRoute(p.id));
-        } }, icon('plus'), 'New project'))),
-    projects.length
-      ? h('div', { class: 'grid cards' }, cards)
-      : h('div', { class: 'panel empty' }, icon('folder'), h('h2', {}, 'No projects yet'), h('p', { style: { margin: 0 } }, 'Create a project, then add its deliverable list, plot plan PDF and contractor models.')),
-    h('div', { class: 'grid two' },
-      h('div', { class: 'panel' }, h('div', { class: 'eyebrow' }, 'Supported inputs'), h('dl', { class: 'kv', style: { marginTop: '12px' } },
-        h('dt', {}, 'Plot plan'), h('dd', {}, 'PDF (vector or scanned)'),
-        h('dt', {}, 'Direct 3D'), h('dd', {}, 'GLB · glTF · FBX · OBJ · DAE · STL · PLY'),
-        h('dt', {}, 'Via converter'), h('dd', {}, 'NWD · NWC · DWFx · DWF · SKP · RVT · IFC'),
-        h('dt', {}, 'Exports'), h('dd', {}, 'XLSX · GLB-ready · MP4/WebM motion'))),
-      h('div', { class: 'panel' }, h('div', { class: 'eyebrow' }, 'Install on phone / iPad'), h('p', { class: 'dim2', style: { margin: '12px 0 0' } },
-        'iPhone & iPad: open in Safari → Share → Add to Home Screen. Android: Chrome menu → Install app. Laptop: the install icon in the address bar. Data is stored on each device; use Backup on a project to move it.'))),
-    h('div', { class: 'foot' }, h('span', {}, COPYRIGHT), h('span', { class: 'no-i18n' }, `Review 3D v${VERSION}`)),
-  );
+    h('div', { class: 'hhead' },
+      h('div', {}, h('h1', {}, 'Projects'), h('p', { class: 'sub' }, `${projects.length} project${projects.length === 1 ? '' : 's'}`)),
+      h('button', { class: 'btn primary', onclick: newProject }, icon('plus'), 'New project')),
+    h('div', { class: 'hgrid' }, cards,
+      h('button', { class: 'hcard add', type: 'button', onclick: newProject }, icon('plus'), h('b', {}, 'New project'), h('small', {}, 'Start from a plot plan PDF or a contractor 3D model.'))));
 }

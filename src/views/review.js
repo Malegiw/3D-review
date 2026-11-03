@@ -705,10 +705,17 @@ export async function renderReview(main, project) {
   return () => {
     motion?.stop();
     if (viewer.recording) viewer.stopRecording();
+    // leave a cover picture on the project card (best effort — never blocks leaving the view)
+    let coverSaved;
+    try {
+      const cover = viewer.meshes().length ? viewer.coverShot(640) : null;
+      if (cover) coverSaved = db.get('projects', project.id).then((cur) => cur && db.put('projects', { ...cur, thumb: cover })).catch(() => {});
+    } catch { /* WebGL context lost, etc. */ }
     viewer.clearHighlights();
     viewer.setMode('select');
     offs.forEach((f) => f());
     viewer.setInset({});
     viewer.host.remove();
+    return coverSaved; // the router waits for it, so the project list already shows the new cover
   };
 }

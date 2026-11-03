@@ -577,6 +577,42 @@ export class Viewer {
     return c.toDataURL('image/jpeg', 0.78);
   }
 
+  /** A picture of the whole model from the default angle, cropped to `aspect`, for the project card. The live camera is untouched. */
+  coverShot(width = 640, aspect = 1.6) {
+    const box = this.boundsOf(null, { robust: true });
+    if (box.isEmpty()) return null;
+    const cam = this.camera;
+    const keep = { p: cam.position.clone(), q: cam.quaternion.clone(), near: cam.near, far: cam.far };
+    const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(size.length() / 2, 0.5);
+    const dir = new THREE.Vector3(1, 0.8, 1).normalize();
+    const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+    cam.near = Math.max(0.01, radius / 2000); cam.far = Math.max(1000, radius * 60);
+    const place = (d) => { cam.position.copy(centre).addScaledVector(dir, d); cam.lookAt(centre); cam.updateProjectionMatrix(); cam.updateMatrixWorld(); };
+    // closest distance at which the whole box still sits inside the cropped frame (8% margin)
+    const fits = (d) => {
+      place(d);
+      const wide = cam.aspect > aspect, lx = wide ? aspect / cam.aspect : 1, ly = wide ? 1 : cam.aspect / aspect;
+      return corners.every((c) => { const q = c.clone().project(cam); return q.z < 1 && Math.abs(q.x) <= 0.92 * lx && Math.abs(q.y) <= 0.92 * ly; });
+    };
+    let lo = radius * 0.3, hi = radius / Math.sin(THREE.MathUtils.degToRad(cam.fov / 2)) * 1.6;
+    for (let i = 0; i < 16; i++) { const mid = (lo + hi) / 2; if (fits(mid)) hi = mid; else lo = mid; }
+    place(hi);
+    try {
+      this.renderer.render(this.scene, this.camera);
+      const src = this.renderer.domElement;
+      let cw = src.width, ch = cw / aspect;
+      if (ch > src.height) { ch = src.height; cw = ch * aspect; }
+      const c = document.createElement('canvas');
+      c.width = width; c.height = Math.round(width / aspect);
+      c.getContext('2d').drawImage(src, (src.width - cw) / 2, (src.height - ch) / 2, cw, ch, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.8);
+    } finally {
+      cam.position.copy(keep.p); cam.quaternion.copy(keep.q); cam.near = keep.near; cam.far = keep.far;
+      cam.updateProjectionMatrix(); cam.updateMatrixWorld(); this.requestRender();
+    }
+  }
+
   startRecording(fps = 30) {
     const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
     const mime = types.find((t) => window.MediaRecorder?.isTypeSupported?.(t));
