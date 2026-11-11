@@ -49,7 +49,23 @@
       "merged": true,
       "engine": "nwd-reader",
       "converted": "2026-11-02T16:50:03.505Z"
+    },
+    {
+      "name": "27-10-2026-FEED-PIPING_CTR_258",
+      "file": "1793069352000-27-10-2026-feed-piping-ctr-258.glb",
+      "source": "1793069352000-27-10-2026-FEED-PIPING_CTR_258.nwd",
+      "size": 16815124,
+      "units": "m",
+      "zUp": false,
+      "origin": [
+        7498,
+        0,
+        -446
+      ],
+      "objects": 14349,
+      "engine": "nwd-reader",
+      "converted": "2026-11-11T07:00:11.819Z"
     }
   ],
-  "updated": "2026-11-02T16:50:03.514Z"
+  "updated": "2026-11-11T07:00:11.833Z"
 }
