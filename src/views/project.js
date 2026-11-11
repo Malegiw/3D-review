@@ -1,12 +1,11 @@
-import { h, icon, toast, formDialog, confirmDialog, pickFiles, download, fmt, uid } from '../core/ui.js';
+import { h, icon, toast, formDialog, confirmDialog, pickFiles, download, fmt, uid, countUp, holdButton, popover } from '../core/ui.js';
+import { sCurveData, sCurve, statusDonut, barList } from './charts.js';
 import { db } from '../core/db.js';
 import { DOC_STATUS, REVIEW_CODES, DISCIPLINES, DOC_TYPES, statusOf, docStats, isOverdue } from '../core/domain.js';
 import { buildXlsx, parseCSV } from '../core/xlsx.js';
 import { exportProject } from '../core/store.js';
 import { go, projectRoute, state } from '../core/app.js';
 import { projectDialog } from './home.js';
-
-const kpi = (v, l, color) => h('div', { class: 'panel kpi' }, h('div', { class: 'v', style: color ? { color } : null }, v), h('div', { class: 'l' }, l));
 
 export async function renderOverview(main, project) {
   const page = h('div', { class: 'page' });
@@ -17,23 +16,28 @@ export async function renderOverview(main, project) {
   const openClash = clashes.filter((r) => r.status !== 'Resolved' && r.status !== 'Approved').length;
   const today = fmt.today();
 
-  const stack = h('div', { class: 'stack' }, DOC_STATUS.filter((s) => st.byStatus[s.v]).map((s) => h('i', { style: { width: `${(st.byStatus[s.v] / Math.max(1, st.total)) * 100}%`, background: s.c }, title: `${s.s}: ${st.byStatus[s.v]}` })));
-  const legend = h('div', { class: 'legend' }, DOC_STATUS.filter((s) => st.byStatus[s.v]).map((s) => h('span', { style: { '--c': s.c } }, `${s.s} ${st.byStatus[s.v]}`)));
-
   const byDisc = {};
   for (const d of docs) { const k = d.discipline || 'General'; (byDisc[k] ||= []).push(d); }
-  const discRows = Object.entries(byDisc).sort((a, b) => b[1].length - a[1].length).map(([k, list]) => {
+  const discRows = Object.entries(byDisc).map(([k, list]) => {
     const s = docStats(list);
-    return h('tr', {}, h('td', { 'data-l': 'Discipline' }, k), h('td', { class: 'num', 'data-l': 'Docs' }, s.total), h('td', { class: 'num', 'data-l': 'Done' }, s.done),
-      h('td', { 'data-l': 'Progress', style: { minWidth: '140px' } }, h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } }, h('div', { class: 'bar', style: { flex: 1 } }, h('i', { style: { width: `${s.progress}%` } })), h('span', { class: 'mono' }, fmt.pct(s.progress)))),
-      h('td', { class: 'num', 'data-l': 'Overdue', style: { color: s.overdue ? 'var(--red)' : null } }, s.overdue));
-  });
+    return { label: k, value: s.progress, meta: `${s.total} docs${s.overdue ? ` · ${s.overdue} overdue` : ''}` };
+  }).sort((a, b) => b.value - a.value);
 
-  const upcoming = docs.filter((d) => statusOf(d.status).w < 100 && d.status !== 'ON HOLD' && d.planDate).sort((a, b) => a.planDate.localeCompare(b.planDate)).slice(0, 7);
+  const upcoming = docs.filter((d) => statusOf(d.status).w < 100 && d.status !== 'ON HOLD' && d.planDate).sort((a, b) => a.planDate.localeCompare(b.planDate)).slice(0, 6);
+  const curve = sCurveData(docs, { start: project.start, finish: project.finish, progress: st.progress, today });
+  const gap = curve ? curve.actual - curve.planned : 0;
+
+  const stat = (label, value, opts = {}) => h('div', { class: `stat ${opts.tone || ''}` }, h('span', { class: 'stat-l' }, label), countUp(h('b', { class: 'stat-v' }), value, opts), opts.note ? h('small', { class: 'stat-n' }, opts.note) : null);
+  const del = holdButton({ label: 'Hold to delete', onConfirm: async () => {
+    await db.deleteProject(project.id);
+    if (state.viewerProject === project.id) { state.viewer?.clear(); state.viewerProject = null; }
+    toast('Project deleted.', 'ok');
+    go('home');
+  } });
 
   page.append(
     h('div', { class: 'page-head' },
-      h('div', {}, h('h1', {}, project.name),
+      h('div', {}, h('h1', { class: 'no-i18n' }, project.name),
         h('div', { class: 'head-meta' },
           h('span', { class: 'head-tags' }, h('span', { class: 'chip code no-i18n' }, project.code || 'Project'), project.phase ? h('span', { class: 'chip dot', style: { '--c': 'var(--cyan)' } }, project.phase) : null),
           h('span', {}, project.facility || '—'), h('span', {}, `Client ${project.client || '—'}`), h('span', {}, `Contractor ${project.contractor || '—'}`), h('span', {}, `${fmt.date(project.start)} → ${fmt.date(project.finish)}`))),
@@ -52,33 +56,35 @@ export async function renderOverview(main, project) {
           download(blob, `${(project.code || 'project').replace(/[^\w-]+/g, '_')}_${fmt.today()}.nexus.zip`);
           toast(`Backup ready (${fmt.bytes(blob.size)}).`, 'ok');
         } }, icon('download'), 'Backup'),
-        h('button', { class: 'btn danger sm', onclick: async () => {
-          if (!await confirmDialog(`Delete "${project.name}" with all its documents, plot plans, models and clash tests from this device?`, { title: 'Delete project', okLabel: 'Delete', danger: true })) return;
-          await db.deleteProject(project.id);
-          if (state.viewerProject === project.id) { state.viewer?.clear(); state.viewerProject = null; }
-          toast('Project deleted.', 'ok');
-          go('home');
-        } }, icon('trash'), 'Delete'))),
-    h('div', { class: 'grid kpis' },
-      kpi(st.total, 'Deliverables'),
-      kpi(fmt.pct(st.progress), 'Weighted progress', 'var(--cyan)'),
-      kpi(st.done, 'IFC / AFC / As-built', 'var(--green)'),
-      kpi(st.overdue, 'Overdue', st.overdue ? 'var(--red)' : null),
-      kpi(models.length + plans.length, 'Models + plot plans'),
-      kpi(openClash, 'Open clashes', openClash ? 'var(--magenta)' : null)),
+        del)),
+    h('div', { class: 'stats' },
+      stat('Deliverables', st.total),
+      stat('Weighted progress', st.progress || 0, { suffix: '%', tone: 'accent' }),
+      stat('IFC / AFC / As-built', st.done, { tone: st.done ? 'good' : '' }),
+      stat('Overdue', st.overdue, { tone: st.overdue ? 'bad' : '' }),
+      stat('Models + plot plans', models.length + plans.length),
+      stat('Open clashes', openClash, { tone: openClash ? 'warn' : '' })),
+    curve ? h('section', { class: 'panel' },
+      h('div', { class: 'panel-title' },
+        h('div', {}, h('h3', {}, 'Progress S-curve'), h('p', { class: 'sub', style: { marginTop: '4px' } }, 'Cumulative weighted progress, planned against actual.')),
+        h('div', { class: 'ch-legend' },
+          h('span', {}, h('i', { class: 'k act' }), 'Actual', h('b', {}, fmt.pct(curve.actual))),
+          h('span', {}, h('i', { class: 'k plan' }), 'Planned', h('b', {}, fmt.pct(curve.planned))),
+          h('span', { class: `ch-gap ${gap < -0.5 ? 'behind' : 'ahead'}` }, Math.abs(gap) < 0.5 ? 'On plan' : `${gap > 0 ? '+' : '−'}${fmt.num(Math.abs(gap), 0)}% ${gap > 0 ? 'ahead of plan' : 'behind plan'}`))),
+      sCurve(curve)) : null,
     h('div', { class: 'grid two' },
-      h('div', { class: 'col' },
-        h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Status distribution'), h('a', { class: 'btn sm ghost', href: `#${projectRoute(project.id, 'docs')}` }, 'Open list')),
-          st.total ? [stack, legend] : h('p', { class: 'dim2' }, 'No deliverables yet.')),
-        h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Progress by discipline')),
-          discRows.length ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl cards' }, h('thead', {}, h('tr', {}, h('th', {}, 'Discipline'), h('th', { class: 'num' }, 'Docs'), h('th', { class: 'num' }, 'Done'), h('th', {}, 'Progress'), h('th', { class: 'num' }, 'Overdue'))), h('tbody', {}, discRows))) : h('p', { class: 'dim2' }, 'Add deliverables to see progress.'))),
+      h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Status'), h('a', { class: 'btn sm ghost', href: `#${projectRoute(project.id, 'docs')}` }, 'Open list', icon('arrowr'))),
+        st.total ? statusDonut(st.byStatus, st.total) : h('p', { class: 'dim2' }, 'No deliverables yet.')),
+      h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Progress by discipline')),
+        discRows.length ? barList(discRows) : h('p', { class: 'dim2' }, 'Add deliverables to see progress.'))),
+    h('div', { class: 'grid two' },
       h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Next due'), h('span', { class: 'sub' }, `Today ${fmt.date(today)}`)),
-        upcoming.length ? h('div', { class: 'clist duelist' }, upcoming.map((d) => h('div', { class: 'citem' },
-          h('span', { class: 'chip', style: { '--c': statusOf(d.status).c } }, statusOf(d.status).s), h('div', { class: 'nm' }, d.title, h('small', { class: 'no-i18n' }, d.docNo)),
-          h('span', { class: `due ${isOverdue(d) ? 'late' : ''}` }, fmt.date(d.planDate))))) : h('p', { class: 'dim2' }, 'Nothing pending.'))),
-    h('div', { class: 'grid two' },
-      h('a', { class: 'panel pcard', href: `#${projectRoute(project.id, 'plot')}`, style: { textDecoration: 'none', color: 'inherit' } }, h('p', { class: 'sub' }, 'Plot plan → 3D'), h('h2', {}, plans.length ? `${plans.length} plot plan${plans.length > 1 ? 's' : ''} · ${plans.reduce((n, p) => n + (p.objects?.length || 0), 0)} objects` : 'Upload a plot plan PDF'), h('p', { class: 'dim2', style: { margin: 0 } }, 'Pick outlines from the PDF, set heights, generate the 3D model with build-up motion.')),
-      h('a', { class: 'panel pcard', href: `#${projectRoute(project.id, 'review')}`, style: { textDecoration: 'none', color: 'inherit' } }, h('p', { class: 'sub' }, '3D review'), h('h2', {}, `${models.length} contractor model${models.length === 1 ? '' : 's'} · ${clashes.length} clash results`), h('p', { class: 'dim2', style: { margin: 0 } }, 'Federated view, section box, measure, viewpoints, clash detection and MTO.'))),
+        upcoming.length ? h('div', { class: 'clist duelist' }, upcoming.map((d) => h('button', { type: 'button', class: 'citem', onclick: () => { state.docQuery = d.docNo; go(projectRoute(project.id, 'docs')); } },
+          h('span', { class: 'chip', style: { '--c': statusOf(d.status).c } }, statusOf(d.status).s), h('div', { class: 'nm' }, h('span', { class: 'no-i18n' }, d.title), h('small', { class: 'no-i18n' }, d.docNo)),
+          h('span', { class: `due ${isOverdue(d) ? 'late' : ''}` }, fmt.date(d.planDate))))) : h('p', { class: 'dim2' }, 'Nothing pending.')),
+      h('div', { class: 'col' },
+        h('a', { class: 'panel pcard go', href: `#${projectRoute(project.id, 'plot')}` }, h('span', { class: 'go-ic' }, icon('map')), h('div', {}, h('h3', {}, plans.length ? `${plans.length} plot plan${plans.length > 1 ? 's' : ''} · ${plans.reduce((n, p) => n + (p.objects?.length || 0), 0)} objects` : 'Upload a plot plan PDF'), h('p', { class: 'sub' }, 'Pick outlines from the PDF, set heights, generate the 3D model with build-up motion.')), icon('arrowr', 'go-arrow')),
+        h('a', { class: 'panel pcard go', href: `#${projectRoute(project.id, 'review')}` }, h('span', { class: 'go-ic' }, icon('cube')), h('div', {}, h('h3', {}, `${models.length} contractor model${models.length === 1 ? '' : 's'} · ${clashes.length} clash results`), h('p', { class: 'sub' }, 'Federated view, section box, measure, viewpoints, clash detection and MTO.')), icon('arrowr', 'go-arrow')))),
   );
 }
 
@@ -111,7 +117,8 @@ export async function renderDocs(main, project) {
   const page = h('div', { class: 'page' });
   main.append(page);
   let docs = await db.byProject('deliverables', project.id);
-  const f = { q: '', status: '', disc: '' };
+  const f = { q: state.docQuery || '', status: '', disc: '' };
+  state.docQuery = null; // set by search / dashboard links to open the list filtered on one document
   const tbody = h('tbody');
   const summary = h('div', { class: 'mono dim', style: { fontSize: '12px' } });
 
@@ -131,11 +138,17 @@ export async function renderDocs(main, project) {
     tbody.innerHTML = '';
     for (const d of list) {
       const s = statusOf(d.status);
-      const stSel = h('select', { class: 'inp st-sel', 'aria-label': 'Status', style: { '--c': s.c, color: s.c }, onchange: async (e) => {
-        d.status = e.target.value;
-        if (statusOf(d.status).w >= 60 && !d.actualDate) d.actualDate = fmt.today();
-        await save(d); draw();
-      } }, DOC_STATUS.map((o) => h('option', { value: o.v, selected: o.v === d.status }, o.s)));
+      // status picker: a popover with every status and its colour instead of a plain dropdown
+      const stSel = h('button', { type: 'button', class: 'st-pick', style: { '--c': s.c }, 'aria-haspopup': 'listbox', title: s.l, onclick: (e) => {
+        const { close } = popover(e.currentTarget, h('div', { class: 'pop-list', role: 'listbox', 'aria-label': 'Status' }, h('div', { class: 'pop-h' }, 'Status'),
+          DOC_STATUS.map((o) => h('button', { type: 'button', role: 'option', 'aria-selected': String(o.v === d.status), class: `pop-row ${o.v === d.status ? 'on' : ''}`, onclick: async () => {
+            close();
+            if (o.v === d.status) return;
+            d.status = o.v;
+            if (statusOf(d.status).w >= 60 && !d.actualDate) d.actualDate = fmt.today();
+            await save(d); draw();
+          } }, h('i', { class: 'pop-dot', style: { background: o.c } }), h('span', {}, o.s), o.l.includes('·') ? h('small', {}, o.l.split('· ')[1]) : null))), { width: 290 });
+      } }, h('i', { class: 'pop-dot', style: { background: s.c } }), h('span', {}, s.s), icon('chev'));
       const rvSel = h('select', { class: 'inp', 'aria-label': 'Review code', onchange: async (e) => { d.review = e.target.value; await save(d); } }, REVIEW_CODES.map((o) => h('option', { value: o.v, selected: o.v === (d.review || '') }, o.v || '—')));
       tbody.append(h('tr', { class: isOverdue(d) ? 'overdue' : '' },
         h('td', { class: 'code no-i18n', 'data-l': 'Doc No' }, d.docNo),
@@ -211,7 +224,7 @@ export async function renderDocs(main, project) {
         h('button', { class: 'btn ghost sm', onclick: exportX }, icon('download'), 'Export XLSX'),
         h('button', { class: 'btn primary sm', onclick: () => edit(null) }, icon('plus'), 'Add'))),
     h('div', { class: 'panel', style: { padding: '12px' } }, h('div', { class: 'form-grid' },
-      h('div', { class: 'field' }, h('label', { for: 'dq' }, 'Search'), h('input', { class: 'inp', id: 'dq', placeholder: 'Doc no, title, PIC…', oninput: (e) => { f.q = e.target.value; draw(); } })),
+      h('div', { class: 'field' }, h('label', { for: 'dq' }, 'Search'), h('input', { class: 'inp', id: 'dq', type: 'search', value: f.q, placeholder: 'Doc no, title, PIC…', oninput: (e) => { f.q = e.target.value; draw(); } })),
       h('div', { class: 'field' }, h('label', { for: 'ds' }, 'Status'), h('select', { class: 'inp', id: 'ds', onchange: (e) => { f.status = e.target.value; draw(); } }, h('option', { value: '' }, 'All'), DOC_STATUS.map((s) => h('option', { value: s.v }, s.s)))),
       h('div', { class: 'field' }, h('label', { for: 'dd' }, 'Discipline'), h('select', { class: 'inp', id: 'dd', onchange: (e) => { f.disc = e.target.value; draw(); } }, h('option', { value: '' }, 'All'), DISCIPLINES.map((s) => h('option', { value: s }, s)))))),
     h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl cards' },

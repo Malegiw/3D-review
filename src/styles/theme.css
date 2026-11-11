@@ -69,14 +69,15 @@
   --mark-left: #0f766e;
   --mark-right: #0b4440;
   --mark-stroke: none;
-  --st-not: #8a9596;
-  --st-prog: #5f4fd0;
-  --st-ifr: #2b77c9;
-  --st-ifa: #d0700f;
-  --st-ifc: #18804a;
-  --st-afc: #0f9483;
-  --st-asb: #0f766e;
-  --st-hold: #cf3b2e;
+  /* deliverable status, in workflow order; checked with the dataviz palette validator (CVD-separated neighbours) */
+  --st-not: #9aa4a5;
+  --st-prog: #eda100;
+  --st-ifr: #2a78d6;
+  --st-ifa: #eb6834;
+  --st-ifc: #1599b0;
+  --st-afc: #3a8f2c;
+  --st-asb: #6250d6;
+  --st-hold: #d8453a;
   --pp-stage: #fbfcfc;
   --pp-filter: none;
   --pp-opacity: 1;
@@ -145,14 +146,14 @@
   --mark-top: #ff7d3a;
   --mark-left: #5cd0bf;
   --mark-right: #1e6a61;
-  --st-not: #74807f;
-  --st-prog: #a597ff;
-  --st-ifr: #62a8ff;
-  --st-ifa: #ff9f45;
-  --st-ifc: #4fd38c;
-  --st-afc: #62e0c8;
-  --st-asb: #5cd0bf;
-  --st-hold: #ff6a5c;
+  --st-not: #7d8789;
+  --st-prog: #c98500;
+  --st-ifr: #3987e5;
+  --st-ifa: #d95926;
+  --st-ifc: #21a3bd;
+  --st-afc: #6fa83a;
+  --st-asb: #9085e9;
+  --st-hold: #e5584c;
   --pp-stage: #0b0f10;
   --pp-filter: invert(1) hue-rotate(180deg) brightness(0.92);
   --pp-opacity: 0.9;
@@ -520,7 +521,7 @@ input[type=range] { accent-color: var(--cyan); width: 100%; }
 [data-theme="cyber"] .seg .glide { display: none; }
 
 /* ---------- chips ---------- */
-.chip { --c: var(--fg-3); display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--r-pill); color: color-mix(in srgb, var(--c) 78%, var(--fg)); background: color-mix(in srgb, var(--c) 13%, transparent); font: 500 12.5px/1.25 var(--f-ui); letter-spacing: 0; text-transform: var(--case); white-space: nowrap; }
+.chip { --c: var(--fg-3); display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--r-pill); color: color-mix(in srgb, var(--c) 62%, var(--fg)); background: color-mix(in srgb, var(--c) 13%, transparent); font: 500 12.5px/1.25 var(--f-ui); letter-spacing: 0; text-transform: var(--case); white-space: nowrap; }
 .chip.dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
 .chip.code { font-family: var(--f-mono); font-weight: 400; font-size: 12px; }
 [data-theme="cyber"] .chip { border: 1px solid color-mix(in srgb, var(--c) 60%, transparent); color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); font: 400 11px/1.2 var(--f-mono); letter-spacing: .1em; padding: 3px 8px; }

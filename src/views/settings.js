@@ -5,6 +5,7 @@ import { THEMES, getTheme, setTheme } from '../core/theme.js';
 import { LANGS, currentLang, setLang } from '../core/i18n.js';
 import { importProject } from '../core/store.js';
 import { VERSION, COPYRIGHT, go, projectRoute } from '../core/app.js';
+import { soundOn, setSound } from '../core/sound.js';
 
 // a tiny picture of each theme: page, a card on it, the accent and the 3D pick colour
 const SWATCH = {
@@ -71,7 +72,9 @@ export function openSettings({ onLang } = {}) {
   const body = h('div', { class: 'settings' },
     section('Appearance',
       themeRow,
-      h('div', { class: 'set-line' }, h('span', {}, 'Language'), langRow)),
+      h('div', { class: 'set-line' }, h('span', {}, 'Language'), langRow),
+      h('div', { class: 'set-line' }, h('span', {}, 'Interface sounds', h('small', { class: 'set-hint' }, 'Soft ticks on taps, a chime when something finishes.')),
+        h('button', { type: 'button', class: 'switch', role: 'switch', 'aria-checked': String(soundOn()), 'aria-label': 'Interface sounds', onclick: (e) => { const on = e.currentTarget.getAttribute('aria-checked') !== 'true'; e.currentTarget.setAttribute('aria-checked', String(on)); setSound(on); } }))),
     section('Install on your device',
       h('div', { class: 'set-card' }, h('b', {}, INSTALL[here].title), steps(here)),
       h('details', { class: 'set-more' }, h('summary', {}, 'Other devices'),

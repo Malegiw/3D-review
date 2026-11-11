@@ -1,5 +1,6 @@
 // Tiny DOM + UI helpers (no framework).
 import { locale } from './i18n.js';
+import { play } from './sound.js';
 
 export function h(tag, attrs = {}, ...kids) {
   const el = tag === 'svg' || attrs?.svg ? document.createElementNS('http://www.w3.org/2000/svg', tag) : document.createElement(tag);
@@ -67,6 +68,14 @@ const ICONS = {
   db: 'M4 6c0-2 16-2 16 0v12c0 2-16 2-16 0zM4 6c0 2 16 2 16 0M4 12c0 2 16 2 16 0',
   palette: 'M12 3a9 9 0 100 18c1.2 0 1.6-.9 1.6-1.6 0-1-.8-1.3-.8-2.2 0-.9.8-1.6 1.7-1.6H16a5 5 0 005-5c0-4.3-4-7.6-9-7.6zM7.5 12.5h.01M9.5 8h.01M14.5 8h.01M17 11.5h.01',
   github: 'M9 19c-4 1.5-4-2-6-2.5M15 22v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 00-1.3-3.2 4.2 4.2 0 00-.1-3.2s-1-.3-3.4 1.3a11.6 11.6 0 00-6 0C6.8 2.8 5.8 3.1 5.8 3.1a4.2 4.2 0 00-.1 3.2A4.6 4.6 0 004.4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V22',
+  panel: 'M3 4h18v16H3zM9 4v16',
+  chev: 'M6 9l6 6 6-6',
+  chevr: 'M9 6l6 6-6 6',
+  updown: 'M8 9l4-4 4 4M8 15l4 4 4-4',
+  sound: 'M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12',
+  enter: 'M20 5v7a3 3 0 01-3 3H5M9 11l-4 4 4 4',
+  clock: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2',
+  arrowr: 'M5 12h14M13 6l6 6-6 6',
 };
 
 export function icon(name, cls = '') {
@@ -92,12 +101,97 @@ export function logoMark() {
   return wrap.firstChild;
 }
 
+// Toasts stack like cards (beUI toast stack): the newest in front, older ones tucked behind it; hovering or tapping
+// the stack fans them out so every message can be read.
+function layoutToasts() {
+  const box = document.getElementById('toasts');
+  if (!box) return;
+  const list = [...box.querySelectorAll('.toast:not(.out)')].reverse(); // newest first
+  const open = box.matches(':hover') || box.classList.contains('open');
+  let y = 0;
+  list.forEach((t, i) => {
+    t.style.setProperty('--i', i);
+    t.style.setProperty('--y', `${-y}px`);
+    t.style.zIndex = String(100 - i);
+    t.classList.toggle('hid', !open && i > 2);
+    y += t.offsetHeight + 8;
+  });
+  box.classList.toggle('stack', !open && list.length > 1);
+  box.style.setProperty('--h0', `${list[0]?.offsetHeight || 0}px`);
+}
 export function toast(msg, type = 'info', title) {
   const box = document.getElementById('toasts');
   if (!box) return;
-  const t = h('div', { class: `toast ${type}` }, h('b', {}, title || { info: 'Info', ok: 'Done', err: 'Error', warn: 'Notice' }[type] || 'Info'), msg);
+  if (!box.dataset.wired) {
+    box.dataset.wired = '1';
+    box.addEventListener('pointerenter', layoutToasts);
+    box.addEventListener('pointerleave', () => { box.classList.remove('open'); layoutToasts(); });
+    box.addEventListener('click', () => { box.classList.toggle('open'); layoutToasts(); });
+  }
+  const t = h('div', { class: `toast ${type}` }, h('b', {}, title || { info: 'Info', ok: 'Done', err: 'Error', warn: 'Notice' }[type] || 'Info'), h('span', {}, msg));
   box.append(t);
-  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 260); }, type === 'err' ? 6500 : 3800);
+  layoutToasts();
+  if (type === 'ok') play('ok'); else if (type === 'err') play('err');
+  const life = type === 'err' ? 6500 : 4200;
+  const out = () => { if (box.matches(':hover')) return setTimeout(out, 1200); t.classList.add('out'); layoutToasts(); setTimeout(() => { t.remove(); layoutToasts(); }, 280); };
+  setTimeout(out, life);
+}
+
+/** Count a number up to its value (tabular figures keep the width steady). Instant with reduced motion. */
+export function countUp(el, to, { dp = 0, suffix = '', ms = 900 } = {}) {
+  const fmtN = (v) => `${Number(v).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}${suffix}`;
+  if (!isFinite(to) || matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = isFinite(to) ? fmtN(to) : '—'; return el; }
+  const t0 = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 4);
+    el.textContent = fmtN(to * e);
+    if (k < 1 && el.isConnected) requestAnimationFrame(step); else el.textContent = fmtN(to);
+  };
+  el.textContent = fmtN(0);
+  requestAnimationFrame(step);
+  return el;
+}
+
+/** A small floating panel that unfolds from its trigger. Closes on outside tap or Escape. */
+export function popover(anchor, content, { onClose, width } = {}) {
+  document.querySelector('.pop')?._close?.();
+  const pop = h('div', { class: 'pop', role: 'dialog' }, content);
+  if (width) pop.style.width = `${width}px`;
+  document.body.append(pop);
+  const r = anchor.getBoundingClientRect(), pr = { width: pop.offsetWidth, height: pop.offsetHeight }; // offset sizes: the unfold animation scales the box
+  const below = innerHeight - r.bottom > pr.height + 12 || r.top < pr.height + 12;
+  const left = Math.max(8, Math.min(r.left, innerWidth - pr.width - 8));
+  pop.style.left = `${left}px`;
+  pop.style.top = `${below ? r.bottom + 6 : r.top - pr.height - 6}px`;
+  pop.style.transformOrigin = `${r.left - left + r.width / 2}px ${below ? 0 : pr.height}px`;
+  const onDown = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  function close() { pop.classList.add('out'); document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey); setTimeout(() => pop.remove(), 160); onClose?.(); }
+  pop._close = close;
+  setTimeout(() => { document.addEventListener('pointerdown', onDown, true); document.addEventListener('keydown', onKey); }, 0);
+  return { el: pop, close };
+}
+
+/** Destructive action that needs a deliberate hold (Arc hold-to-confirm): the fill runs while pressed. */
+export function holdButton({ label, ms = 1200, onConfirm, cls = 'btn danger sm', iconName = 'trash' }) {
+  let t = 0, raf = 0, t0 = 0;
+  const b = h('button', { type: 'button', class: `${cls} hold`, title: 'Press and hold' }, h('i', { class: 'hold-fill', 'aria-hidden': 'true' }), iconName ? icon(iconName) : null, h('span', {}, label));
+  const fill = b.firstChild;
+  const set = (k) => fill.style.transform = `scaleX(${k})`;
+  const stop = () => { clearTimeout(t); cancelAnimationFrame(raf); b.classList.remove('holding'); set(0); };
+  const start = (e) => {
+    if (e.type === 'keydown' && (e.repeat || (e.key !== 'Enter' && e.key !== ' '))) return;
+    e.preventDefault();
+    b.classList.add('holding'); t0 = performance.now();
+    const tick = (now) => { set(Math.min(1, (now - t0) / ms)); if (b.classList.contains('holding')) raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    t = setTimeout(() => { stop(); play('ok'); onConfirm(); }, ms);
+  };
+  b.addEventListener('pointerdown', start);
+  b.addEventListener('keydown', start);
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'keyup', 'blur']) b.addEventListener(ev, stop);
+  b.addEventListener('click', (e) => e.preventDefault());
+  return b;
 }
 
 export function modal({ title, eyebrow, body, actions = [], wide = false, onClose }) {

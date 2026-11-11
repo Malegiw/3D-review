@@ -3,12 +3,12 @@
 // and starts the next one from there: the highlight travels from the old option to the new one instead of jumping.
 // Pure transform/size transitions; reduced motion just places it.
 
-const GROUPS = '.seg, .rail';
+const GROUPS = '.seg, .side-nav, .tabbar';
 const last = new Map(); // group key → { x, y, w, h } relative to the group
 let raf = 0;
 const pending = new Set();
 
-const keyOf = (g) => g.getAttribute('aria-label') || (g.classList.contains('rail') ? 'rail' : `${g.className}|${[...g.children].filter((c) => c.tagName === 'BUTTON' || c.tagName === 'A').length}`);
+const keyOf = (g) => (g.classList.contains('side-nav') ? 'side' : g.classList.contains('tabbar') ? 'tabbar' : g.getAttribute('aria-label') || `${g.className}|${[...g.children].filter((c) => c.tagName === 'BUTTON' || c.tagName === 'A').length}`);
 
 function place(g) {
   if (!g.isConnected) return;

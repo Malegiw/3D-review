@@ -10,6 +10,7 @@ import { buildPlotModel } from '../engine/plotbuild.js';
 import { getGround } from '../engine/ground.js';
 import { loadModelFiles, guessUnits, guessZUp, ACCEPT, NATIVE_FORMATS, ext } from '../engine/loaders.js';
 import { readObjects } from '../engine/objects.js';
+import { setActivity, clearActivity } from '../core/island.js';
 import { runClash } from '../engine/clash.js';
 import { runMTO } from '../engine/mto.js';
 import { mtoResult } from './mto-view.js';
@@ -23,6 +24,11 @@ const STATUS_C = { New: 'var(--red)', Active: 'var(--orange)', Reviewed: 'var(--
 
 export async function renderReview(main, project) {
   const viewer = state.viewer ||= new Viewer();
+  // the viewer's status line lives in the Dynamic Island (top centre) instead of its own overlay
+  if (!viewer._islandHud) {
+    viewer._islandHud = true;
+    viewer.setHud = (title, sub = '') => { if (title) setActivity('hud', { title, detail: sub }); else clearActivity('hud'); };
+  }
   try { const r = localStorage.getItem('r3d-selres'); if (['part', 'component', 'item'].includes(r)) viewer.selectRes = r; } catch { /* storage blocked */ }
   const root = h('div', { class: 'v3' });
   main.append(root);
@@ -88,7 +94,7 @@ export async function renderReview(main, project) {
       if (t === '-') { rail.append(h('div', { class: 'tool-sep' })); continue; }
       const [id, ic, tip] = t;
       const on = id === panel || (id === 'xray' && viewer.xray && !viewer.overrides.size) || (id === 'measure' && viewer.mode === 'measure');
-      rail.append(h('button', { class: `tool ${id === 'clash' || id === 'motion' ? 'mag' : ''} ${on ? 'on' : ''}`, 'data-tip': tip, 'aria-label': tip, 'aria-pressed': on, onclick: () => toolClick(id) }, icon(ic)));
+      rail.append(h('button', { class: `tool ${id === 'clash' || id === 'motion' ? 'mag' : ''} ${on ? 'on' : ''}`, 'data-tip': tip, 'aria-label': tip, 'aria-pressed': on, onclick: () => toolClick(id) }, icon(ic), h('span', { class: 'tl', 'aria-hidden': 'true' }, tip)));
     }
   }
   function toolClick(id) {
@@ -109,6 +115,8 @@ export async function renderReview(main, project) {
     panel = id;
     renderRail();
     drawer.hidden = !id;
+    root.classList.toggle('has-drawer', !!id);
+    if (!id) { drawer.style.removeProperty('--sheet-h'); drawer.classList.remove('min'); }
     if (id) renderPanel();
     corner();
     updateInset();
@@ -124,15 +132,50 @@ export async function renderReview(main, project) {
   const ro = new ResizeObserver(updateInset);
   ro.observe(drawer);
   offs.push(() => ro.disconnect());
+  const SNAPS = [0.3, 0.56, 0.88];
+  function sheetDrag(head) {
+    let y0 = 0, h0 = 0, dragging = false, moved = false;
+    head.addEventListener('pointerdown', (e) => {
+      if (window.innerWidth > 760 || e.target.closest('button:not(.drawer-grip)')) return;
+      dragging = true; moved = false; y0 = e.clientY; h0 = drawer.getBoundingClientRect().height;
+      drawer.classList.add('dragging');
+      head.setPointerCapture(e.pointerId);
+    });
+    head.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const dy = y0 - e.clientY;
+      if (Math.abs(dy) > 4) moved = true;
+      if (!moved) return;
+      drawer.classList.remove('min');
+      drawer.style.setProperty('--sheet-h', `${Math.max(64, Math.min(window.innerHeight * 0.9, h0 + dy))}px`);
+    });
+    const end = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      drawer.classList.remove('dragging');
+      if (!moved) return;
+      e.preventDefault();
+      const host = root.getBoundingClientRect().height;
+      const hNow = drawer.getBoundingClientRect().height / host;
+      if (hNow < 0.2) { drawer.classList.add('min'); drawer.style.removeProperty('--sheet-h'); }
+      else drawer.style.setProperty('--sheet-h', `${Math.round(SNAPS.reduce((a, b) => (Math.abs(b - hNow) < Math.abs(a - hNow) ? b : a)) * host)}px`);
+      updateInset();
+      head.dataset.dragged = '1';
+      setTimeout(() => delete head.dataset.dragged, 50);
+    };
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
+  }
   function shell(title, eyebrow, ...body) {
     drawer.innerHTML = '';
-    const toggle = () => { drawer.classList.toggle('min'); updateInset(); };
+    const toggle = () => { if (drawer.querySelector('.drawer-head')?.dataset.dragged) return; drawer.classList.toggle('min'); updateInset(); };
     drawer.append(
       h('div', { class: 'drawer-head' },
         h('button', { type: 'button', class: 'drawer-grip', 'aria-label': 'Collapse panel', onclick: toggle }),
         h('div', { class: 'drawer-title', onclick: () => { if (window.innerWidth <= 760) toggle(); } }, h('h3', {}, title), eyebrow ? h('p', { class: 'sub' }, eyebrow) : null),
         h('button', { class: 'btn sm icon ghost', 'aria-label': 'Close panel', onclick: () => { drawer.classList.remove('min'); openPanel(null); } }, icon('x'))),
       h('div', { class: 'drawer-body' }, body));
+    sheetDrag(drawer.querySelector('.drawer-head'));
   }
   function renderPanel() {
     ({ layers: pLayers, info: pInfo, measure: pMeasure, section: pSection, views: pViews, clash: pClash, mto: pMTO, motion: pMotion }[panel] || (() => {}))();
@@ -751,6 +794,7 @@ export async function renderReview(main, project) {
     viewer.clearHighlights();
     viewer.setMode('select');
     offs.forEach((f) => f());
+    clearActivity('hud');
     viewer.setInset({});
     viewer.host.remove();
     return coverSaved; // the router waits for it, so the project list already shows the new cover
