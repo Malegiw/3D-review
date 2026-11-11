@@ -1,14 +1,14 @@
 // Domain vocabulary: deliverable workflow, disciplines, plot plan categories, materials.
 
 export const DOC_STATUS = [
-  { v: 'NOT STARTED', w: 0, c: 'var(--st-not)', l: 'Not started' },
-  { v: 'IN PROGRESS', w: 30, c: 'var(--st-prog)', l: 'In progress' },
-  { v: 'IFR', w: 60, c: 'var(--st-ifr)', l: 'IFR · Issued for Review' },
-  { v: 'IFA', w: 80, c: 'var(--st-ifa)', l: 'IFA · Issued for Approval' },
-  { v: 'IFC', w: 100, c: 'var(--st-ifc)', l: 'IFC · Issued for Construction' },
-  { v: 'AFC', w: 100, c: 'var(--st-afc)', l: 'AFC · Approved for Construction' },
-  { v: 'AS-BUILT', w: 100, c: 'var(--st-asb)', l: 'As-Built' },
-  { v: 'ON HOLD', w: 0, c: 'var(--st-hold)', l: 'On hold' },
+  { v: 'NOT STARTED', w: 0, c: 'var(--st-not)', l: 'Not started', s: 'Not started' },
+  { v: 'IN PROGRESS', w: 30, c: 'var(--st-prog)', l: 'In progress', s: 'In progress' },
+  { v: 'IFR', w: 60, c: 'var(--st-ifr)', l: 'IFR · Issued for Review', s: 'IFR' },
+  { v: 'IFA', w: 80, c: 'var(--st-ifa)', l: 'IFA · Issued for Approval', s: 'IFA' },
+  { v: 'IFC', w: 100, c: 'var(--st-ifc)', l: 'IFC · Issued for Construction', s: 'IFC' },
+  { v: 'AFC', w: 100, c: 'var(--st-afc)', l: 'AFC · Approved for Construction', s: 'AFC' },
+  { v: 'AS-BUILT', w: 100, c: 'var(--st-asb)', l: 'As-Built', s: 'As-built' },
+  { v: 'ON HOLD', w: 0, c: 'var(--st-hold)', l: 'On hold', s: 'On hold' },
 ];
 export const statusOf = (v) => DOC_STATUS.find((s) => s.v === v) || DOC_STATUS[0];
 

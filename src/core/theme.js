@@ -1,26 +1,26 @@
-// Visual themes. "cloud" (light) and "night" (dark) follow the 2026/27 direction: calm Cloud-Dancer white,
-// WGSN Transformative Teal as the working accent and hi-vis safety orange as the single hot colour.
+// Visual themes. "cloud" (Light) and "night" (Dark) follow the 2026/27 direction: calm neutral surfaces, a teal accent
+// for what is active or selected, and safety orange only for what is picked or measured in 3D.
 // "cyber" keeps the original neon control-room look.
 const KEY = 'r3d-theme';
 
 export const THEMES = [
-  { id: 'cloud', label: 'Cloud', hint: 'Light · 2026' },
-  { id: 'night', label: 'Night', hint: 'Dark · 2026' },
+  { id: 'cloud', label: 'Light', hint: 'Calm, for daylight' },
+  { id: 'night', label: 'Dark', hint: 'Graphite, for the evening' },
   { id: 'cyber', label: 'Cyberpunk', hint: 'Neon classic' },
 ];
 
 /** Colours the 3D engine cannot read from CSS. */
 export const VIEW3D = {
   cloud: {
-    bg: ['#f4f7f6', '#c9d4d2'], gridMinor: 0xb9c7c4, gridMajor: 0x6f9e98, gridOpacity: [0.55, 0.7],
-    sel: 0xf2621a, selEmissive: 0x8a2f00, xray: 0x0a6c6a, hemi: [0xffffff, 0x7d8a86, 1.15], sun: 1.6, env: 0.6,
-    edge: 0x0a4f4d, edgeOpacity: 0.35, beam: 0xf2621a, beamBlend: 'normal', measure: 0xd9530f, box: 0x0a6c6a,
+    bg: ['#f8fafa', '#d8dfdf'], gridMinor: 0xc3cdcd, gridMajor: 0x83a09d, gridOpacity: [0.55, 0.7],
+    sel: 0xef6a1f, selEmissive: 0x7a2a00, xray: 0x0f766e, hemi: [0xffffff, 0x7d8a86, 1.15], sun: 1.6, env: 0.6,
+    edge: 0x0b4440, edgeOpacity: 0.32, beam: 0xef6a1f, beamBlend: 'normal', measure: 0xe0601a, box: 0x0f766e,
     ground: [10, 79, 77, 0, 215],
   },
   night: {
-    bg: ['#15302d', '#060c0b'], gridMinor: 0x16302c, gridMajor: 0x2f7c72, gridOpacity: [0.5, 0.6],
-    sel: 0xff7a33, selEmissive: 0xb54300, xray: 0x35c2b1, hemi: [0xd8f3ee, 0x1a2422, 1.05], sun: 1.5, env: 0.55,
-    edge: 0xa6e6dc, edgeOpacity: 0.4, beam: 0xff7a33, beamBlend: 'add', measure: 0xffb347, box: 0x35c2b1,
+    bg: ['#1b2325', '#090c0d'], gridMinor: 0x1e2a2c, gridMajor: 0x3b726b, gridOpacity: [0.5, 0.6],
+    sel: 0xff7d3a, selEmissive: 0xb54300, xray: 0x5cd0bf, hemi: [0xe2f2ef, 0x1a2222, 1.05], sun: 1.5, env: 0.55,
+    edge: 0xa6e6dc, edgeOpacity: 0.38, beam: 0xff7d3a, beamBlend: 'add', measure: 0xffb347, box: 0x5cd0bf,
     ground: [126, 226, 212, 6, 200],
   },
   cyber: {
@@ -37,7 +37,7 @@ const CAT_COLORS = {
 };
 export const catColor = (cat, fallback, id = getTheme()) => CAT_COLORS[id]?.[cat] || fallback;
 
-const META = { cloud: '#eef1f0', night: '#0c1716', cyber: '#07060c' };
+const META = { cloud: '#f3f5f5', night: '#0d1112', cyber: '#07060c' };
 
 export function getTheme() {
   let t = null;

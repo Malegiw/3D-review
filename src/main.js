@@ -19,6 +19,7 @@ import { renderOverview, renderDocs } from './views/project.js';
 import { renderPlot } from './views/plotplan.js';
 import { renderReview } from './views/review.js';
 import { openSettings } from './views/settings.js';
+import { startGlide } from './core/motion.js';
 
 import { VERSION, YEAR, state, projectRoute } from './core/app.js';
 
@@ -52,7 +53,7 @@ function renderTop(route) {
       h('div', { class: 'logo-sub' }, 'by Yan Malegi Diardi')));
   const crumb = h('div', { class: 'crumb' });
   if (route.name === 'project' && state.project) {
-    crumb.append(h('span', { class: 'crumb-hide sep' }, '/'), h('span', { class: 'crumb-hide no-i18n' }, state.project.code || 'PRJ'), h('span', { class: 'crumb-hide sep' }, '/'), h('b', { class: 'no-i18n' }, state.project.name));
+    crumb.append(h('span', { class: 'crumb-hide sep' }, '/'), h('span', { class: 'crumb-hide code no-i18n' }, state.project.code || 'PRJ'), h('span', { class: 'crumb-hide sep' }, '/'), h('b', { class: 'no-i18n' }, state.project.name));
   }
   const settingsBtn = h('button', { type: 'button', class: 'theme-btn', 'aria-label': 'Settings', title: 'Settings', 'aria-haspopup': 'dialog', onclick: () => openSettings({ onLang: () => route_() }) }, icon('gear'));
   top.append(logo, crumb, h('div', { class: 'top-actions' },
@@ -109,6 +110,7 @@ function boot() {
 window.nexus = state; // handy for debugging from the browser console
 applyTheme();
 startI18n();
+startGlide();
 window.addEventListener('r3d:theme', () => { const r = state.route; if (r) renderTop(r); });
 
 (async function start() {

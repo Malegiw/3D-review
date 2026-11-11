@@ -97,7 +97,7 @@ export function toast(msg, type = 'info', title) {
   if (!box) return;
   const t = h('div', { class: `toast ${type}` }, h('b', {}, title || { info: 'Info', ok: 'Done', err: 'Error', warn: 'Notice' }[type] || 'Info'), msg);
   box.append(t);
-  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 320); }, type === 'err' ? 6500 : 3800);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 260); }, type === 'err' ? 6500 : 3800);
 }
 
 export function modal({ title, eyebrow, body, actions = [], wide = false, onClose }) {
@@ -115,7 +115,7 @@ export function modal({ title, eyebrow, body, actions = [], wide = false, onClos
     const r = await a.onClick?.(e);
     if (r !== false) close(a.value ?? r);
   } },
-  h('div', { class: 'panel-title' }, h('div', {}, eyebrow ? h('div', { class: 'eyebrow' }, eyebrow) : null, h('h2', { style: { marginTop: eyebrow ? '8px' : 0 } }, title)),
+  h('div', { class: 'panel-title' }, h('div', { style: { minWidth: 0 } }, h('h2', {}, title), eyebrow ? h('p', { class: 'sub' }, eyebrow) : null),
     h('button', { class: 'btn sm icon ghost', type: 'button', 'aria-label': 'Close', onclick: () => close(null) }, icon('x'))),
   body, actions.length ? acts : null);
   back.append(box);
@@ -129,7 +129,7 @@ export function modal({ title, eyebrow, body, actions = [], wide = false, onClos
 export function confirmDialog(message, { title = 'Confirm', okLabel = 'Confirm', danger = false } = {}) {
   return new Promise((resolve) => {
     modal({
-      title, eyebrow: danger ? 'Warning' : 'Confirm', body: h('p', { style: { margin: 0, color: 'var(--fg-2)' } }, message),
+      title, body: h('p', { style: { margin: 0, color: 'var(--fg-2)' } }, message),
       actions: [{ label: 'Cancel', value: false }, { label: okLabel, kind: danger ? 'danger' : 'primary', value: true }],
       onClose: (v) => resolve(!!v),
     });

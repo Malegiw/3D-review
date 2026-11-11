@@ -130,7 +130,7 @@ export async function renderReview(main, project) {
     drawer.append(
       h('div', { class: 'drawer-head' },
         h('button', { type: 'button', class: 'drawer-grip', 'aria-label': 'Collapse panel', onclick: toggle }),
-        h('div', { class: 'drawer-title', onclick: () => { if (window.innerWidth <= 760) toggle(); } }, h('div', { class: 'eyebrow' }, eyebrow), h('h3', { style: { marginTop: '6px' } }, title)),
+        h('div', { class: 'drawer-title', onclick: () => { if (window.innerWidth <= 760) toggle(); } }, h('h3', {}, title), eyebrow ? h('p', { class: 'sub' }, eyebrow) : null),
         h('button', { class: 'btn sm icon ghost', 'aria-label': 'Close panel', onclick: () => { drawer.classList.remove('min'); openPanel(null); } }, icon('x'))),
       h('div', { class: 'drawer-body' }, body));
   }
@@ -196,7 +196,7 @@ export async function renderReview(main, project) {
     return new Promise((resolve) => {
       const when = outs[0]?.converted ? fmt.date(outs[0].converted) : '';
       modal({
-        title: 'Already converted', eyebrow: 'Converter',
+        title: 'Already converted',
         body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
           h('p', { style: { margin: 0 }, class: 'dim2' }, 'This exact file was converted before. Using that result skips the upload and the wait.'),
           when ? h('p', { class: 'dim', style: { margin: 0 } }, 'Converted ', h('span', { class: 'no-i18n' }, when)) : null),
@@ -208,7 +208,7 @@ export async function renderReview(main, project) {
   function converterHelp(name) {
     const e = ext(name);
     modal({
-      title: `${NATIVE_FORMATS[e] || e.toUpperCase()} needs the converter`, eyebrow: 'Native format', wide: true,
+      title: `${NATIVE_FORMATS[e] || e.toUpperCase()} needs the converter`, wide: true,
       body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
         h('p', { class: 'dim2', style: { margin: 0 } }, `.${e} is a closed Autodesk/Trimble format, so it is translated by Autodesk first. Set up the converter once (about 10 minutes), then NWD, NWC, DWFx, DWF, SKP, RVT and IFC files convert from this button and land in the 3D review automatically.`),
         h('div', { class: 'note' }, h('b', {}, 'No setup? '), 'Navisworks Manage/Simulate: Output → Export Scene → FBX, then import the FBX here. SketchUp: File → Export → 3D Model → glTF/DAE/FBX.'),
@@ -486,7 +486,7 @@ export async function renderReview(main, project) {
     shell('Viewpoints', 'Saved views',
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn sm primary', onclick: async () => {
-          const v = await formDialog({ title: 'Save viewpoint', eyebrow: 'Viewpoint', fields: [{ id: 'name', label: 'Name', value: `View ${vps.length + 1}`, required: true, span: true }, { id: 'comment', label: 'Review comment', type: 'textarea', span: true }] });
+          const v = await formDialog({ title: 'Save viewpoint', fields: [{ id: 'name', label: 'Name', value: `View ${vps.length + 1}`, required: true, span: true }, { id: 'comment', label: 'Review comment', type: 'textarea', span: true }] });
           if (!v) return;
           await db.put('viewpoints', { id: uid('v'), projectId: project.id, name: v.name, comment: v.comment, camera: viewer.getCamera(), thumb: viewer.snapshot(320), section: viewer.section.on ? [viewer.section.box.min.toArray(), viewer.section.box.max.toArray()] : null, created: Date.now() });
           pViews();

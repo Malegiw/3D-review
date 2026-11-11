@@ -6,9 +6,10 @@ import { LANGS, currentLang, setLang } from '../core/i18n.js';
 import { importProject } from '../core/store.js';
 import { VERSION, COPYRIGHT, go, projectRoute } from '../core/app.js';
 
+// a tiny picture of each theme: page, a card on it, the accent and the 3D pick colour
 const SWATCH = {
-  cloud: 'linear-gradient(135deg, #eef1f0 50%, #0a6c6a 50% 80%, #f2621a 80%)',
-  night: 'linear-gradient(135deg, #0c1716 50%, #35c2b1 50% 80%, #ff7a33 80%)',
+  cloud: 'radial-gradient(circle at 78% 34%, #ef6a1f 0 7%, transparent 7.5%), linear-gradient(90deg, transparent 18%, #0f766e 18% 44%, transparent 44%) 0 72% / 100% 12% no-repeat, linear-gradient(#ffffff, #ffffff) 12% 50% / 64% 70% no-repeat, #e9eded',
+  night: 'radial-gradient(circle at 78% 34%, #ff7d3a 0 7%, transparent 7.5%), linear-gradient(90deg, transparent 18%, #5cd0bf 18% 44%, transparent 44%) 0 72% / 100% 12% no-repeat, linear-gradient(#1d2426, #1d2426) 12% 50% / 64% 70% no-repeat, #0d1112',
   cyber: 'linear-gradient(135deg, #07060c 50%, #00f0ff 50% 80%, #ff2fd0 80%)',
 };
 
@@ -37,8 +38,20 @@ export function openSettings({ onLang } = {}) {
   const paintThemes = () => {
     themeRow.replaceChildren(...THEMES.map((th) => h('button', {
       type: 'button', class: `set-theme ${th.id === getTheme() ? 'on' : ''}`, 'aria-pressed': String(th.id === getTheme()),
-      onclick: () => { setTheme(th.id); paintThemes(); },
+      onclick: (e) => switchTheme(th.id, e),
     }, h('span', { class: 'sw', style: { background: SWATCH[th.id] } }), h('b', {}, th.label), h('small', {}, th.hint))));
+  };
+  // the new theme opens as a circle from the tapped swatch (View Transitions); instant when motion is reduced
+  const switchTheme = (id, e) => {
+    if (id === getTheme()) return;
+    const run = () => { setTheme(id); paintThemes(); };
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!document.startViewTransition || reduce || !e) return run();
+    const x = e.clientX || innerWidth / 2, y = e.clientY || innerHeight / 2;
+    const root = document.documentElement.style;
+    root.setProperty('--vt-x', `${x}px`); root.setProperty('--vt-y', `${y}px`);
+    root.setProperty('--vt-r', `${Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))}px`);
+    document.startViewTransition(run);
   };
   paintThemes();
 

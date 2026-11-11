@@ -7,7 +7,7 @@ import { coverArt } from './cover-art.js';
 
 export async function projectDialog(p = {}) {
   return formDialog({
-    title: p.id ? 'Edit project' : 'New project', eyebrow: 'Project data', submitLabel: p.id ? 'Save' : 'Create',
+    title: p.id ? 'Edit project' : 'New project', submitLabel: p.id ? 'Save' : 'Create',
     fields: [
       { id: 'code', label: 'Project No. / WBS', value: p.code, required: true, mono: true, placeholder: 'e.g. SPHR01149A' },
       { id: 'name', label: 'Project name', value: p.name, required: true, span: true },

@@ -17,8 +17,8 @@ export async function renderOverview(main, project) {
   const openClash = clashes.filter((r) => r.status !== 'Resolved' && r.status !== 'Approved').length;
   const today = fmt.today();
 
-  const stack = h('div', { class: 'stack' }, DOC_STATUS.filter((s) => st.byStatus[s.v]).map((s) => h('i', { style: { width: `${(st.byStatus[s.v] / Math.max(1, st.total)) * 100}%`, background: s.c }, title: `${s.v}: ${st.byStatus[s.v]}` })));
-  const legend = h('div', { class: 'legend' }, DOC_STATUS.filter((s) => st.byStatus[s.v]).map((s) => h('span', { style: { '--c': s.c } }, `${s.v} ${st.byStatus[s.v]}`)));
+  const stack = h('div', { class: 'stack' }, DOC_STATUS.filter((s) => st.byStatus[s.v]).map((s) => h('i', { style: { width: `${(st.byStatus[s.v] / Math.max(1, st.total)) * 100}%`, background: s.c }, title: `${s.s}: ${st.byStatus[s.v]}` })));
+  const legend = h('div', { class: 'legend' }, DOC_STATUS.filter((s) => st.byStatus[s.v]).map((s) => h('span', { style: { '--c': s.c } }, `${s.s} ${st.byStatus[s.v]}`)));
 
   const byDisc = {};
   for (const d of docs) { const k = d.discipline || 'General'; (byDisc[k] ||= []).push(d); }
@@ -33,8 +33,9 @@ export async function renderOverview(main, project) {
 
   page.append(
     h('div', { class: 'page-head' },
-      h('div', {}, h('div', { class: 'eyebrow' }, `${project.code || 'Project'} · ${project.phase || ''}`), h('h1', {}, project.name),
-        h('div', { class: 'mono dim', style: { display: 'flex', flexWrap: 'wrap', gap: '6px 16px', fontSize: '12px' } },
+      h('div', {}, h('h1', {}, project.name),
+        h('div', { class: 'head-meta' },
+          h('span', { class: 'head-tags' }, h('span', { class: 'chip code no-i18n' }, project.code || 'Project'), project.phase ? h('span', { class: 'chip dot', style: { '--c': 'var(--cyan)' } }, project.phase) : null),
           h('span', {}, project.facility || '—'), h('span', {}, `Client ${project.client || '—'}`), h('span', {}, `Contractor ${project.contractor || '—'}`), h('span', {}, `${fmt.date(project.start)} → ${fmt.date(project.finish)}`))),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn ghost sm', onclick: async () => {
@@ -66,17 +67,18 @@ export async function renderOverview(main, project) {
       kpi(models.length + plans.length, 'Models + plot plans'),
       kpi(openClash, 'Open clashes', openClash ? 'var(--magenta)' : null)),
     h('div', { class: 'grid two' },
-      h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Status distribution'), h('a', { class: 'btn sm ghost', href: `#${projectRoute(project.id, 'docs')}` }, 'Open list')),
-        st.total ? [stack, legend] : h('p', { class: 'dim2' }, 'No deliverables yet.')),
-      h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Next due'), h('span', { class: 'mono dim', style: { fontSize: '12px' } }, `Today ${fmt.date(today)}`)),
-        upcoming.length ? h('div', { class: 'clist' }, upcoming.map((d) => h('div', { class: 'citem', style: { cursor: 'default', borderColor: isOverdue(d) ? 'var(--red)' : null } },
-          h('span', { class: 'chip', style: { '--c': statusOf(d.status).c } }, d.status), h('div', { class: 'nm' }, d.title, h('small', {}, d.docNo)),
-          h('span', { class: 'mono', style: { fontSize: '12px', color: isOverdue(d) ? 'var(--red)' : 'var(--fg-2)' } }, fmt.date(d.planDate))))) : h('p', { class: 'dim2' }, 'Nothing pending.'))),
-    h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Progress by discipline')),
-      discRows.length ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl cards' }, h('thead', {}, h('tr', {}, h('th', {}, 'Discipline'), h('th', { class: 'num' }, 'Docs'), h('th', { class: 'num' }, 'Done'), h('th', {}, 'Progress'), h('th', { class: 'num' }, 'Overdue'))), h('tbody', {}, discRows))) : h('p', { class: 'dim2' }, 'Add deliverables to see progress.')),
+      h('div', { class: 'col' },
+        h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Status distribution'), h('a', { class: 'btn sm ghost', href: `#${projectRoute(project.id, 'docs')}` }, 'Open list')),
+          st.total ? [stack, legend] : h('p', { class: 'dim2' }, 'No deliverables yet.')),
+        h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Progress by discipline')),
+          discRows.length ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl cards' }, h('thead', {}, h('tr', {}, h('th', {}, 'Discipline'), h('th', { class: 'num' }, 'Docs'), h('th', { class: 'num' }, 'Done'), h('th', {}, 'Progress'), h('th', { class: 'num' }, 'Overdue'))), h('tbody', {}, discRows))) : h('p', { class: 'dim2' }, 'Add deliverables to see progress.'))),
+      h('section', { class: 'panel' }, h('div', { class: 'panel-title' }, h('h3', {}, 'Next due'), h('span', { class: 'sub' }, `Today ${fmt.date(today)}`)),
+        upcoming.length ? h('div', { class: 'clist duelist' }, upcoming.map((d) => h('div', { class: 'citem' },
+          h('span', { class: 'chip', style: { '--c': statusOf(d.status).c } }, statusOf(d.status).s), h('div', { class: 'nm' }, d.title, h('small', { class: 'no-i18n' }, d.docNo)),
+          h('span', { class: `due ${isOverdue(d) ? 'late' : ''}` }, fmt.date(d.planDate))))) : h('p', { class: 'dim2' }, 'Nothing pending.'))),
     h('div', { class: 'grid two' },
-      h('a', { class: 'panel pcard', href: `#${projectRoute(project.id, 'plot')}`, style: { textDecoration: 'none', color: 'inherit' } }, h('div', { class: 'eyebrow' }, 'Plot plan → 3D'), h('h2', {}, plans.length ? `${plans.length} plot plan${plans.length > 1 ? 's' : ''} · ${plans.reduce((n, p) => n + (p.objects?.length || 0), 0)} objects` : 'Upload a plot plan PDF'), h('p', { class: 'dim2', style: { margin: 0 } }, 'Pick outlines from the PDF, set heights, generate the 3D model with build-up motion.')),
-      h('a', { class: 'panel pcard', href: `#${projectRoute(project.id, 'review')}`, style: { textDecoration: 'none', color: 'inherit' } }, h('div', { class: 'eyebrow' }, '3D review'), h('h2', {}, `${models.length} contractor model${models.length === 1 ? '' : 's'} · ${clashes.length} clash results`), h('p', { class: 'dim2', style: { margin: 0 } }, 'Federated view, section box, measure, viewpoints, clash detection and MTO.'))),
+      h('a', { class: 'panel pcard', href: `#${projectRoute(project.id, 'plot')}`, style: { textDecoration: 'none', color: 'inherit' } }, h('p', { class: 'sub' }, 'Plot plan → 3D'), h('h2', {}, plans.length ? `${plans.length} plot plan${plans.length > 1 ? 's' : ''} · ${plans.reduce((n, p) => n + (p.objects?.length || 0), 0)} objects` : 'Upload a plot plan PDF'), h('p', { class: 'dim2', style: { margin: 0 } }, 'Pick outlines from the PDF, set heights, generate the 3D model with build-up motion.')),
+      h('a', { class: 'panel pcard', href: `#${projectRoute(project.id, 'review')}`, style: { textDecoration: 'none', color: 'inherit' } }, h('p', { class: 'sub' }, '3D review'), h('h2', {}, `${models.length} contractor model${models.length === 1 ? '' : 's'} · ${clashes.length} clash results`), h('p', { class: 'dim2', style: { margin: 0 } }, 'Federated view, section box, measure, viewpoints, clash detection and MTO.'))),
   );
 }
 
@@ -115,7 +117,7 @@ export async function renderDocs(main, project) {
 
   const save = async (d) => { await db.put('deliverables', d); };
   const edit = async (d) => {
-    const v = await formDialog({ title: d ? 'Edit deliverable' : 'Add deliverable', eyebrow: 'Document register', fields: docFields(d || {}), wide: true });
+    const v = await formDialog({ title: d ? 'Edit deliverable' : 'Add deliverable', fields: docFields(d || {}), wide: true });
     if (!v) return;
     if (d) Object.assign(d, v); else { d = { id: uid('d'), projectId: project.id, ...v }; docs.push(d); }
     await save(d);
@@ -129,18 +131,18 @@ export async function renderDocs(main, project) {
     tbody.innerHTML = '';
     for (const d of list) {
       const s = statusOf(d.status);
-      const stSel = h('select', { class: 'inp st-sel', 'aria-label': 'Status', style: { borderLeftColor: s.c, color: s.c }, onchange: async (e) => {
+      const stSel = h('select', { class: 'inp st-sel', 'aria-label': 'Status', style: { '--c': s.c, color: s.c }, onchange: async (e) => {
         d.status = e.target.value;
         if (statusOf(d.status).w >= 60 && !d.actualDate) d.actualDate = fmt.today();
         await save(d); draw();
-      } }, DOC_STATUS.map((o) => h('option', { value: o.v, selected: o.v === d.status }, o.v)));
+      } }, DOC_STATUS.map((o) => h('option', { value: o.v, selected: o.v === d.status }, o.s)));
       const rvSel = h('select', { class: 'inp', 'aria-label': 'Review code', onchange: async (e) => { d.review = e.target.value; await save(d); } }, REVIEW_CODES.map((o) => h('option', { value: o.v, selected: o.v === (d.review || '') }, o.v || '—')));
       tbody.append(h('tr', { class: isOverdue(d) ? 'overdue' : '' },
-        h('td', { class: 'mono', 'data-l': 'Doc No' }, d.docNo),
+        h('td', { class: 'code no-i18n', 'data-l': 'Doc No' }, d.docNo),
         h('td', { 'data-l': 'Title', style: { minWidth: '200px' } }, d.title),
         h('td', { 'data-l': 'Disc.' }, d.discipline),
         h('td', { 'data-l': 'Type' }, d.type),
-        h('td', { class: 'mono', 'data-l': 'Rev' }, d.rev || '—'),
+        h('td', { class: 'code', 'data-l': 'Rev' }, d.rev || '—'),
         h('td', { 'data-l': 'Status' }, stSel),
         h('td', { 'data-l': 'Review' }, rvSel),
         h('td', { class: 'mono', 'data-l': 'Plan', style: { color: isOverdue(d) ? 'var(--red)' : null, whiteSpace: 'nowrap' } }, fmt.date(d.planDate)),
@@ -203,14 +205,14 @@ export async function renderDocs(main, project) {
 
   page.append(
     h('div', { class: 'page-head' },
-      h('div', {}, h('div', { class: 'eyebrow' }, 'Document register'), h('h1', {}, 'Deliverable list'), summary),
+      h('div', {}, h('h1', {}, 'Deliverable list'), summary),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn ghost sm', onclick: importCSV, title: 'Columns: Doc No, Title, Discipline, Type, Rev, Status, Review, Plan, Actual, PIC, Remarks' }, icon('upload'), 'Import CSV'),
         h('button', { class: 'btn ghost sm', onclick: exportX }, icon('download'), 'Export XLSX'),
         h('button', { class: 'btn primary sm', onclick: () => edit(null) }, icon('plus'), 'Add'))),
     h('div', { class: 'panel', style: { padding: '12px' } }, h('div', { class: 'form-grid' },
       h('div', { class: 'field' }, h('label', { for: 'dq' }, 'Search'), h('input', { class: 'inp', id: 'dq', placeholder: 'Doc no, title, PIC…', oninput: (e) => { f.q = e.target.value; draw(); } })),
-      h('div', { class: 'field' }, h('label', { for: 'ds' }, 'Status'), h('select', { class: 'inp', id: 'ds', onchange: (e) => { f.status = e.target.value; draw(); } }, h('option', { value: '' }, 'All'), DOC_STATUS.map((s) => h('option', { value: s.v }, s.v)))),
+      h('div', { class: 'field' }, h('label', { for: 'ds' }, 'Status'), h('select', { class: 'inp', id: 'ds', onchange: (e) => { f.status = e.target.value; draw(); } }, h('option', { value: '' }, 'All'), DOC_STATUS.map((s) => h('option', { value: s.v }, s.s)))),
       h('div', { class: 'field' }, h('label', { for: 'dd' }, 'Discipline'), h('select', { class: 'inp', id: 'dd', onchange: (e) => { f.disc = e.target.value; draw(); } }, h('option', { value: '' }, 'All'), DISCIPLINES.map((s) => h('option', { value: s }, s)))))),
     h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl cards' },
       h('thead', {}, h('tr', {}, ['Doc No', 'Title', 'Disc.', 'Type', 'Rev', 'Status', 'Review', 'Plan', 'Actual', 'PIC', ''].map((x) => h('th', {}, x)))), tbody)),

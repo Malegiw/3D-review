@@ -101,7 +101,7 @@ export async function renderPlot(main, project) {
       const c = CATS[o.cat] || CATS.equipment;
       const p = S('path', { d: shapePath(o.shape), class: `obj ${o.id === selId ? 'sel' : ''}`, fill: o.shape.kind === 'line' || c.kind === 'wall' ? 'none' : `${c.color}2a`, stroke: c.color });
       gObjs.append(p);
-      if (o.tag) { const [x, y] = centroid(o.shape); const t = S('text', { x, y, fill: c.color, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-family': 'JetBrains Mono Variable, Share Tech Mono, monospace', 'pointer-events': 'none' }); t.textContent = o.tag; gObjs.append(t); }
+      if (o.tag) { const [x, y] = centroid(o.shape); const t = S('text', { x, y, fill: c.color, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-family': 'Geist Mono Variable, Share Tech Mono, monospace', 'pointer-events': 'none' }); t.textContent = o.tag; gObjs.append(t); }
     }
     updateLabels();
   }
@@ -151,7 +151,7 @@ export async function renderPlot(main, project) {
     plan = p;
     await loadPdf();
     renderTools();
-    const v = await formDialog({ title: 'Drawing scale', eyebrow: 'Set scale', submitLabel: 'Apply', fields: [{ id: 'ratio', label: 'Scale 1 : N (as printed on the title block)', type: 'number', value: 500, required: true }] });
+    const v = await formDialog({ title: 'Drawing scale', submitLabel: 'Apply', fields: [{ id: 'ratio', label: 'Scale 1 : N (as printed on the title block)', type: 'number', value: 500, required: true }] });
     if (v?.ratio) { plan.scale = scaleFromRatio(v.ratio); plan.scaleNote = `1:${v.ratio}`; savePlan(); renderTools(); renderSide(); }
     toast('Tip: use Calibrate on a known dimension to verify the scale.', 'info', 'Scale');
   }
@@ -333,13 +333,13 @@ export async function renderPlot(main, project) {
   function renderSide() {
     side.innerHTML = '';
     if (!plan) {
-      side.append(h('div', { class: 'eyebrow' }, 'Plot plan'), h('p', { class: 'dim2', style: { margin: 0 } }, 'Upload the plot plan PDF (vector output from AutoCAD/MicroStation works best; scanned drawings can be traced by hand).'),
+      side.append(h('h3', {}, 'Plot plan'), h('p', { class: 'dim2', style: { margin: 0 } }, 'Upload the plot plan PDF (vector output from AutoCAD/MicroStation works best; scanned drawings can be traced by hand).'),
         h('button', { class: 'btn primary', onclick: async () => { const [f] = await pickFiles({ accept: 'application/pdf,.pdf' }); if (f) await newPlanFromFile(f); } }, icon('upload'), 'Upload PDF'));
       return;
     }
     const sel = plan.objects.find((o) => o.id === selId);
     side.append(h('div', { class: 'panel-title', style: { margin: 0 } },
-      h('div', { style: { minWidth: 0 } }, h('div', { class: 'eyebrow' }, 'Plot plan'), h('h3', { style: { marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis' } }, plan.name)),
+      h('div', { style: { minWidth: 0 } }, h('h3', { style: { overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '18px' } }, plan.name), h('p', { class: 'sub', style: { marginTop: '4px' } }, 'Plot plan')),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn sm icon ghost', 'aria-label': 'Plot plan settings', onclick: settings }, icon('gear')),
         h('button', { class: 'btn sm icon danger', 'aria-label': 'Delete plot plan', onclick: delPlan }, icon('trash')))));
@@ -349,7 +349,7 @@ export async function renderPlot(main, project) {
       const tag = tagInside(cand, texts);
       const similar = shapes.filter((s) => s !== cand && s.kind === cand.kind && Math.abs(area(s) - area(cand)) / Math.max(1, area(cand)) < 0.04 && !plan.objects.some((o) => Math.abs(centroid(o.shape)[0] - centroid(s)[0]) < 0.5 && Math.abs(centroid(o.shape)[1] - centroid(s)[1]) < 0.5));
       side.append(h('div', { class: 'panel hot' },
-        h('div', { class: 'eyebrow' }, `Picked ${cand.kind}`), h('h2', { style: { margin: '6px 0 4px' } }, tag || 'Untagged outline'), h('div', { class: 'mono dim2' }, dims(cand)),
+        h('h2', { style: { margin: '0 0 2px' } }, tag || 'Untagged outline'), h('p', { class: 'sub', style: { margin: '0 0 6px' } }, `Picked ${cand.kind}`), h('div', { class: 'mono dim2' }, dims(cand)),
         h('div', { class: 'lbl', style: { margin: '14px 0 8px' } }, 'Add as'),
         h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' } }, Object.entries(CATS).map(([k, c]) => h('button', {
           class: `btn sm ${k === sug ? 'primary' : 'ghost'}`, style: k === sug ? null : { '--c': c.color, borderColor: `${c.color}88`, color: c.color, justifyContent: 'flex-start' },
@@ -370,7 +370,7 @@ export async function renderPlot(main, project) {
         if (row) { row.children[1].textContent = sel.tag || CATS[sel.cat]?.label; row.children[2].textContent = sel.cat === 'pipe' ? `Ø${sel.dia}` : sel.cat === 'vessel' ? 'H-VSL' : `${sel.h} m`; }
       };
       side.append(h('div', { class: 'panel hot' },
-        h('div', { class: 'eyebrow' }, 'Selected object'),
+        h('h3', {}, 'Selected object'),
         h('div', { class: 'mono dim2', style: { margin: '6px 0 12px' } }, dims(sel.shape)),
         h('div', { class: 'form-grid', style: { gridTemplateColumns: '1fr 1fr' } },
           h('div', { class: 'field', style: { gridColumn: '1 / -1' } }, h('label', { for: 'ot' }, 'Tag / name'), h('input', { class: 'inp mono', id: 'ot', value: sel.tag || '', oninput: (e) => upd('tag', e.target.value) })),
@@ -400,7 +400,7 @@ export async function renderPlot(main, project) {
     applyView();
   }
   async function settings() {
-    const v = await formDialog({ title: 'Plot plan settings', eyebrow: 'Plot plan', fields: [
+    const v = await formDialog({ title: 'Plot plan settings', fields: [
       { id: 'name', label: 'Name', value: plan.name, required: true, span: true },
       { id: 'ratio', label: 'Scale 1 : N', type: 'number', value: ratioFromScale(plan.scale) },
       { id: 'minSize', label: 'Ignore outlines smaller than (pt)', type: 'number', value: plan.minSize || 6 },
