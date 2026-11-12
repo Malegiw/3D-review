@@ -65,7 +65,23 @@
       "objects": 14349,
       "engine": "nwd-reader",
       "converted": "2026-11-11T07:00:11.819Z"
+    },
+    {
+      "name": "10-11-2026_pagi_-FEED-PIPING_CTR_258",
+      "file": "1794387022000-10-11-2026-pagi-feed-piping-ctr-258.glb",
+      "source": "1794387022000-10-11-2026_pagi_-FEED-PIPING_CTR_258.nwd",
+      "size": 19774496,
+      "units": "m",
+      "zUp": false,
+      "origin": [
+        11245,
+        0,
+        -642
+      ],
+      "objects": 19499,
+      "engine": "nwd-reader",
+      "converted": "2026-11-12T01:38:36.364Z"
     }
   ],
-  "updated": "2026-11-11T07:00:11.833Z"
+  "updated": "2026-11-12T01:38:36.374Z"
 }
