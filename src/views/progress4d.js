@@ -187,7 +187,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     ops.sort((x, y) => y.d - x.d);
     const lead = ops[0];
     const phase = lead ? lead.p.name : (di >= n - 1 ? 'Complete' : 'Mobilisation');
-    const bars = sp.slice(0, 14).map(({ p, a, z }) => {
+    const bars = sp.filter(({ p, z }) => z == null ? pctAt(p.curve, t) < DONE_AT : z >= di - 1).slice(0, 10).map(({ p, a, z }) => {
       const end = z ?? n - 1, w = Math.max(1, end - a + 1), l = (a / n) * 100, v = pctAt(p.curve, t);
       const on = di >= a && (z == null || di <= z);
       return h('div', { class: 'p4-g-row' + (on ? ' on' : '') }, h('span', { class: 'p4-g-n' }, p.name),
