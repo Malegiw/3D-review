@@ -9,6 +9,7 @@ import { linesOfPdf, parseReport, dateFromName } from '../engine/dailyreport.js'
 import { buildModel, pctAt, stateOf, activitiesAt, buildProgressXlsx, reportsFromCSV, mergeReports, slimReport, DONE_AT } from '../engine/progress4d.js';
 import { objectGeometry, searchObjects, objectName } from '../engine/objects.js';
 import { displayName } from '../engine/groups.js';
+import { createSequence } from '../engine/sequence4d.js';
 
 const OPT_KEY = 'r3d-4d';
 const AMBER = new THREE.Color(0xf5b82e), GREEN = new THREE.Color(0x2fbf71);
@@ -33,13 +34,15 @@ async function loadRecord(projectId) {
 
 export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) {
   let rec = null, model = null, t = 0, playing = false, stopTick = null, recording = false, live = [];
-  let meshIdx = null, xraySet = false;
-  const opts = { dim: true, hideTodo: false, orbit: false, speed: 2, ...(() => { try { return JSON.parse(localStorage.getItem(OPT_KEY)) || {}; } catch { return {}; } })() };
+  let meshIdx = null, xraySet = false, growing = [];
+  const opts = { dim: true, hideTodo: false, orbit: false, speed: 2, seq: true, fromZero: true, follow: true, hud: true, ...(() => { try { return JSON.parse(localStorage.getItem(OPT_KEY)) || {}; } catch { return {}; } })() };
   const saveOpts = () => { try { localStorage.setItem(OPT_KEY, JSON.stringify(opts)); } catch { /* storage blocked */ } };
   const touched = new Map();   // mesh → previous visibility (meshes we recoloured or hid)
   const overlays = new Map();  // `${pkg}|${meshKey}` → { mesh, ov, geo }
   const applied = new Map();   // pkg → last drawn signature
-  const off = viewer.on('layers', () => { meshIdx = null; });
+  const seq = createSequence(viewer);
+  let seqReady = false, floatEl = null, focus = null, floatDay = -1;
+  const off = viewer.on('layers', () => { meshIdx = null; seqReady = false; });
 
   const save = async () => { await db.put('progress', rec); };
   const N = () => (model ? model.dates.length : 0);
@@ -56,6 +59,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     for (const o of overlays.values()) { o.ov.removeFromParent(); o.geo.dispose(); }
     overlays.clear();
     applied.clear();
+    seq.reset(); seqReady = false; focus = null;
     if (xraySet) { viewer.setXray(false); xraySet = false; }
     viewer.requestRender();
   }
@@ -106,6 +110,16 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     if (dim && !xraySet && hasPanel()) { viewer.xray = true; viewer.refreshAll(); xraySet = true; }
     if (!dim && xraySet) { viewer.setXray(false); xraySet = false; }
     for (const p of model.pkgs) if (targets(p.id).length) drawPkg(p, pctAt(p.curve, t));
+    if (opts.seq && hasPanel()) {
+      if (!seqReady) {
+        const hand = new Set(); for (const p of model.pkgs) for (const tg of targets(p.id)) if (tg.k == null) hand.add(tg.key);
+        seq.prepare((m) => hand.has(m.userData.key));
+        seqReady = true;
+      }
+      const o = pctAt(model.overall, t), o0 = pctAt(model.overall, 0);
+      const frac = opts.fromZero ? (o - o0) / Math.max(1, 100 - o0) : o / 100;
+      growing = seq.set(frac);
+    } else if (seqReady) { seq.reset(); seqReady = false; growing = []; }
     viewer.requestRender();
   }
   const redraw = () => { applied.clear(); apply(); };
@@ -115,6 +129,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     t = Math.min(Math.max(v, 0), Math.max(0, N() - 1));
     apply();
     updateLive(fromSlider);
+    updateFloat();
     const di = Math.round(t);
     viewer.setHud(`4D · ${fmt.date(model.dates[di])}`, `Progress ${pct1(pctAt(model.overall, t))} · day ${di + 1}/${N()}`);
   }
@@ -124,17 +139,79 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     viewer.controls.autoRotate = false;
     updateLive();
   }
+  function followCam(dt) {
+    if (!opts.follow || !growing.length) return;
+    const c = new THREE.Vector3();
+    for (const x of growing) c.add(x.c);
+    c.multiplyScalar(1 / growing.length);
+    focus = focus ? focus.lerp(c, 1 - Math.exp(-dt * 1.6)) : c.clone();
+    const ctl = viewer.controls, cam = viewer.camera;
+    const delta = focus.clone().sub(ctl.target).multiplyScalar(1 - Math.exp(-dt * 2.2));
+    cam.position.add(delta); ctl.target.add(delta);
+    // keep a framing distance proportional to the site, gently tightening on the active zone
+    const want = Math.max(30, seq.bounds().getSize(new THREE.Vector3()).length() * 0.42);
+    const off = cam.position.clone().sub(ctl.target), d = off.length();
+    if (d > 0) cam.position.copy(ctl.target).addScaledVector(off, (d + (want - d) * (1 - Math.exp(-dt * 0.8))) / d);
+    ctl.update();
+  }
+  function frameAll() {
+    const b = seq.bounds(); if (b.isEmpty()) return;
+    const c = b.getCenter(new THREE.Vector3()), r = Math.max(b.getSize(new THREE.Vector3()).length() * 0.55, 20);
+    viewer.camera.far = Math.max(viewer.camera.far, r * 20); viewer.camera.updateProjectionMatrix();
+    viewer.camera.position.copy(c).add(new THREE.Vector3(r * 0.75, r * 0.55, r * 0.75));
+    viewer.controls.target.copy(c); viewer.controls.update(); focus = null;
+  }
+  // ---------- on-screen panels (stage · active operations · Gantt), like a construction-sequence video ----------
+  function spans() {
+    if (model._spans) return model._spans;
+    const n = N();
+    model._spans = model.pkgs.filter((p) => !p.summary).map((p) => {
+      let a = -1, z = -1;
+      for (let i = 0; i < n; i++) { const v = pctAt(p.curve, i); if (a < 0 && v > 0.05) a = i; if (z < 0 && v >= DONE_AT) z = i; }
+      return { p, a: a < 0 ? n - 1 : a, z: z < 0 ? null : z };
+    }).sort((x, y) => x.a - y.a || (x.z ?? 99) - (y.z ?? 99));
+    return model._spans;
+  }
+  function removeFloat() { floatEl?.remove(); floatEl = null; floatDay = -1; }
+  function updateFloat() {
+    if (!model || !hasPanel() || !opts.hud) return removeFloat();
+    if (!floatEl) { floatEl = h('div', { class: 'p4-float' }); viewer.host.append(floatEl); floatDay = -1; }
+    const n = N(), di = Math.round(t);
+    const key = `${di}|${Math.floor(t * 4)}`;
+    if (floatDay === key) return;
+    floatDay = key;
+    const sp = spans();
+    // active operations: activities that moved on this report day
+    const ops = [];
+    for (const p of model.pkgs) if (!p.summary) for (const a of activitiesAt(p, di)) if (a.pct - a.was > 0.05 && !a.dropped) ops.push({ p, a, d: a.pct - a.was });
+    ops.sort((x, y) => y.d - x.d);
+    const lead = ops[0];
+    const phase = lead ? lead.p.name : (di >= n - 1 ? 'Complete' : 'Mobilisation');
+    const bars = sp.slice(0, 14).map(({ p, a, z }) => {
+      const end = z ?? n - 1, w = Math.max(1, end - a + 1), l = (a / n) * 100, v = pctAt(p.curve, t);
+      const on = di >= a && (z == null || di <= z);
+      return h('div', { class: 'p4-g-row' + (on ? ' on' : '') }, h('span', { class: 'p4-g-n' }, p.name),
+        h('span', { class: 'p4-g-t' }, h('i', { class: 'p4-g-b', style: { left: `${l}%`, width: `${(w / n) * 100}%` } }, h('u', { style: { width: `${v}%` } }))));
+    });
+    floatEl.replaceChildren(
+      h('div', { class: 'p4-f-stage' }, h('small', {}, 'Current stage'), h('b', {}, phase), h('span', { class: 'mono' }, `${fmt.date(model.dates[di])} · ${pct1(pctAt(model.overall, t))}`)),
+      h('div', { class: 'p4-f-ops' }, h('small', {}, `Active operations · ${ops.length}`), ...ops.slice(0, 7).map(({ p, a, d }) =>
+        h('div', { class: 'p4-f-op' }, h('span', {}, a.desc), h('em', { class: 'mono' }, `+${d.toFixed(d < 10 ? 1 : 0)}%`)))),
+      h('div', { class: 'p4-f-gantt', style: { '--now-k': String(Math.min(t, n - 1) / Math.max(1, n - 1)) } }, h('small', {}, 'Build sequence'), h('div', { class: 'p4-g-body' }, ...bars, h('span', { class: 'p4-g-now' }))));
+  }
   function play(from = null) {
     if (!model || N() < 2) return;
     stop();
     if (from != null) setT(from); else if (t >= N() - 1) setT(0);
     playing = true;
+    if (opts.follow && t < 0.5) { apply(); frameAll(); }
     viewer.controls.autoRotate = !!opts.orbit;
     viewer.controls.autoRotateSpeed = 1.2;
     updateLive();
     return new Promise((res) => {
       stopTick = viewer.addTicker((dt) => {
         setT(t + dt * opts.speed);
+        followCam(dt);
         if (t >= N() - 1) { stop(); res(); return false; }
         return true;
       });
@@ -361,6 +438,10 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       sCurve(),
       h('div', { class: 'p4-opts' },
         h('label', { class: 'p4-speed' }, 'Speed', h('select', { class: 'inp', onchange: (e) => { opts.speed = +e.target.value; saveOpts(); } }, [[1, '1 day/s'], [2, '2 days/s'], [4, '4 days/s'], [8, '8 days/s']].map(([v, l]) => h('option', { value: v, selected: v === opts.speed }, l)))),
+        chk('Build the model up as progress advances', 'seq', redraw),
+        chk('Start from an empty site at the first report', 'fromZero', redraw),
+        chk('Camera follows the active work', 'follow'),
+        chk('Show stage / operations / Gantt on screen', 'hud', () => { floatDay = -1; updateFloat(); }),
         chk('Dim the rest of the model', 'dim', redraw),
         chk('Hide not-started packages', 'hideTodo', redraw),
         chk('Slow orbit while playing', 'orbit', () => { viewer.controls.autoRotate = playing && opts.orbit; })),
@@ -381,8 +462,8 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
 
   return {
     render,
-    leave() { stop(); clearVisuals(); viewer.setHud(''); },
-    dispose() { stop(); clearVisuals(); off(); },
+    leave() { stop(); clearVisuals(); removeFloat(); viewer.setHud(''); },
+    dispose() { stop(); clearVisuals(); removeFloat(); off(); },
     get playing() { return playing; },
     init,
   };
