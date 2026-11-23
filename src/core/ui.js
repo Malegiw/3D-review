@@ -39,6 +39,7 @@ const ICONS = {
   zap: 'M13 2L4 14h7l-1 8 9-12h-7z',
   calc: 'M5 2h14v20H5zM8 6h8v3H8zM8 13h2M12 13h2M16 13v6M8 17h2M12 17h2',
   play: 'M7 4l13 8-13 8z',
+  timeline: 'M3 5h18M3 12h18M3 19h18M7 3v4M15 10v4M11 17v4',
   film: 'M3 4h18v16H3zM7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4',
   target: 'M12 2v4M12 18v4M2 12h4M18 12h4M12 7a5 5 0 100 10 5 5 0 000-10z',
   plus: 'M12 4v16M4 12h16',

@@ -17,6 +17,7 @@ import { mtoResult } from './mto-view.js';
 import { playBuildUp, playOrbit, playTour } from '../engine/motion.js';
 import { NATIVE_EXT, getConverter, startConversion, projectJobs, retryJob, removeJob, repoClient, importOutput } from '../core/jobs.js';
 import { openConverterSetup } from './converter-setup.js';
+import { createProgress4D } from './progress4d.js';
 
 const STATUS = ['New', 'Active', 'Reviewed', 'Approved', 'Resolved'];
 const MODE_L = { select: 'Select', measure: 'Measure' };
@@ -81,12 +82,13 @@ export async function renderReview(main, project) {
   };
 
   // ---------- tool rail & drawer ----------
+  const p4d = createProgress4D({ viewer, project, shell: (...a) => shell(...a), refresh: () => { if (panel === 'prog') p4d.render(); }, hasPanel: () => panel === 'prog' });
   const rail = h('div', { class: 'tool-rail', role: 'toolbar', 'aria-label': '3D tools' });
   const drawer = h('section', { class: 'panel drawer', hidden: true });
   root.append(rail, drawer);
   const TOOLS = [
     ['layers', 'layers', 'Models'], ['info', 'info', 'Properties'], ['measure', 'ruler', 'Measure'], ['section', 'section', 'Section box'],
-    ['xray', 'xray', 'X-ray'], '-', ['views', 'camera', 'Viewpoints'], ['clash', 'zap', 'Clash detective'], ['mto', 'calc', 'MTO quantities'], ['motion', 'film', 'Motion & video'], '-', ['fit', 'focus', 'Fit all'], ['top', 'map', 'Plan view'],
+    ['xray', 'xray', 'X-ray'], '-', ['views', 'camera', 'Viewpoints'], ['clash', 'zap', 'Clash detective'], ['mto', 'calc', 'MTO quantities'], ['prog', 'timeline', '4D progress'], ['motion', 'film', 'Motion & video'], '-', ['fit', 'focus', 'Fit all'], ['top', 'map', 'Plan view'],
   ];
   function renderRail() {
     rail.innerHTML = '';
@@ -110,6 +112,7 @@ export async function renderReview(main, project) {
     openPanel(panel === id ? null : id);
   }
   function openPanel(id) {
+    if (panel === 'prog' && id !== 'prog') p4d.leave();
     if (panel === 'clash' && id !== 'clash') viewer.clearHighlights();
     if (panel === 'measure' && id !== 'measure' && viewer.mode === 'measure') viewer.setMode('select');
     panel = id;
@@ -178,7 +181,7 @@ export async function renderReview(main, project) {
     sheetDrag(drawer.querySelector('.drawer-head'));
   }
   function renderPanel() {
-    ({ layers: pLayers, info: pInfo, measure: pMeasure, section: pSection, views: pViews, clash: pClash, mto: pMTO, motion: pMotion }[panel] || (() => {}))();
+    ({ layers: pLayers, info: pInfo, measure: pMeasure, section: pSection, views: pViews, clash: pClash, mto: pMTO, prog: () => p4d.render(), motion: pMotion }[panel] || (() => {}))();
   }
 
   // ---------- Models / layers ----------
@@ -784,6 +787,7 @@ export async function renderReview(main, project) {
 
   return () => {
     motion?.stop();
+    p4d.dispose();
     if (viewer.recording) viewer.stopRecording();
     // leave a cover picture on the project card (best effort — never blocks leaving the view)
     let coverSaved;
