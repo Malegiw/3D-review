@@ -239,8 +239,16 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     rec = await loadRecord(project.id);
     rebuild(true);
   }
+  async function removePkgs(ids, label) {
+    if (!(await confirmDialog(`Remove ${label} from the 4D view? Reports stay stored; you can restore it anytime.`, { title: 'Remove from 4D', okLabel: 'Remove', danger: true }))) return;
+    rec.removed = [...new Set([...(rec.removed || []), ...ids])];
+    await save(); redraw(); rebuild(); render();
+  }
+  async function restoreAll() { rec.removed = []; await save(); rebuild(); render(); }
   function rebuild(toEnd = false) {
-    model = Object.keys(rec.reports).length ? buildModel(rec.reports) : null;
+    const ex = new Set(rec.removed || []);
+    const reps = ex.size ? Object.fromEntries(Object.entries(rec.reports).map(([d, r]) => [d, { ...r, rows: (r.rows || []).filter((x) => !ex.has(x.pkg)) }])) : rec.reports;
+    model = Object.keys(rec.reports).length ? buildModel(reps) : null;
     if (model) t = toEnd ? model.dates.length - 1 : Math.min(t, model.dates.length - 1); else t = 0;
   }
   async function importFiles() {
@@ -399,7 +407,8 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
             btn('target', 'Assign selected objects', () => assignSelection(p)),
             btn('search', 'Assign by name', () => assignByName(p, p.hint)),
             btn('focus', 'Zoom to package', () => zoom(p)),
-            n ? btn('x', 'Clear mapping', () => unassign(p)) : null))),
+            n ? btn('x', 'Clear mapping', () => unassign(p)) : null,
+            btn('trash', 'Remove package from 4D', () => removePkgs([p.id], `“${p.name}”`))))),
       acts);
   }
   function render() {
@@ -446,7 +455,16 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
         chk('Hide not-started packages', 'hideTodo', redraw),
         chk('Slow orbit while playing', 'orbit', () => { viewer.controls.autoRotate = playing && opts.orbit; })),
       h('div', { class: 'p4-legend' }, h('span', {}, h('i', { style: { background: STATE_VAR.todo } }), 'Not started'), h('span', {}, h('i', { style: { background: STATE_VAR.wip } }), 'In progress'), h('span', {}, h('i', { style: { background: STATE_VAR.done } }), 'Complete')),
-      groups.map(([a, list]) => h('section', { class: 'p4-grp' }, h('h4', {}, a === 'OFFPLOT' ? 'Offplot' : a === 'ONPLOT' ? 'Onplot' : 'Other'), list.map(pkgRow))),
+      groups.map(([a, list]) => {
+        const nm = a === 'OFFPLOT' ? 'Offplot' : a === 'ONPLOT' ? 'Onplot' : 'Other';
+        const avg = h('span', { class: 'mono dim2' });
+        live.push(() => { avg.textContent = pct1(list.reduce((x, p) => x + pctAt(p.curve, t), 0) / list.length); });
+        return h('details', { class: 'p4-grp', open: !(opts.collapsed || {})[a], ontoggle: (e) => { opts.collapsed = { ...(opts.collapsed || {}), [a]: !e.target.open }; saveOpts(); } },
+          h('summary', { class: 'p4-gh' }, h('span', { class: 'p4-gn' }, nm), h('span', { class: 'dim2' }, `${list.length} pkg`), avg,
+            h('button', { class: 'btn sm icon ghost', 'data-tip': `Remove ${nm} from 4D`, 'aria-label': `Remove ${nm}`, onclick: (e) => { e.preventDefault(); e.stopPropagation(); removePkgs(list.map((p) => p.id), `all ${nm} packages`); } }, icon('trash'))),
+          list.map(pkgRow));
+      }),
+      (rec.removed || []).length ? h('button', { class: 'btn sm ghost', onclick: restoreAll }, `Restore removed (${rec.removed.length})`) : null,
       summ.length ? h('details', { class: 'p4-grp' }, h('summary', { class: 'dim2' }, `Summary rows (${summ.length}) — counted in the report, not in the overall %`), summ.map(pkgRow)) : null,
       conc,
       h('div', { class: 'btn-row' },
