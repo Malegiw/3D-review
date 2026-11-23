@@ -19,6 +19,7 @@ Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (
 | **Measure** | Snap ke sudut ■ / tepi ▲ / permukaan ●, garis preview, jarak + H / V + ΔE / ΔN, mode **Titik** (koordinat E/N/Elev), mode **Terdekat** (jarak bersih antar dua objek), m / mm, hapus per ukuran, ekspor CSV. |
 | **Clash detective** | Hard (dengan toleransi mm: kontak/sentuhan diabaikan, tembus dilaporkan), containment, clearance. Bisa cek di dalam satu model; abaikan dalam satu item (branch/equipment); satu hasil per pasangan komponen. Status workflow, zoom ke clash, export **XLSX**. |
 | **MTO** | Per komponen: volume (m³) hanya untuk solid tertutup, luas (m²), berat per material. Equipment & pipa E3D (envelope pejal) = Other, baja = struktur, beton = pondasi/slab/bund. Override per komponen di Properti. Export **XLSX**. |
+| **4D Progress** | Import **Daily Activity Report PDF** kontraktor (satu file per hari) langsung di app: tabel BQ dibaca otomatis (aktivitas, unit, volume, % progress) lalu digabung per **paket kerja** (Surge Tank, MCC Room, Main Header Segment 1-4, CTI-05, …). Petakan objek 3D ke paket kerja (pilih objek → ◎, atau cari nama), lalu **scrub / play** timeline: tiap paket berubah abu → kuning → hijau mengikuti progress harian, plus S-curve, manpower, concern kontraktor, **record ke video**, dan export **XLSX** (juga bisa import ulang sebagai CSV). |
 
 ### Format file
 
@@ -118,3 +119,14 @@ public/              manifest, service worker, icon, pdf.js fonts/wasm, sample P
 
 ---
 © 2026 Yan Malegi Diardi. All rights reserved. · Review 3D
+
+
+## 4D Progress (laporan harian)
+
+1. **3D Review → 4D progress → Import daily report PDF / CSV.** Pilih semua PDF laporan harian sekaligus (nama file bebas; tanggal dibaca dari isi laporan). Laporan tanggal yang sama diganti, jadi tiap hari tinggal tambah PDF baru.
+2. Aktivitas dikelompokkan per judul di tabel laporan (paket kerja). Baris yang ditulis ulang kontraktor dari hari ke hari (mis. "Install Pipe Line 12"" → "Install Pipe Line 12" Onplot Meno GS") disambung otomatis bila ≥ 55 % kata sama; baris yang baru muncul dihitung 0 % sebelum hari pertamanya.
+3. **Mapping:** pilih objek di 3D (Select resolution: Item / Component) → tombol ◎ pada paket kerja, atau 🔍 untuk mencari nama objek / layer. Satu objek hanya bisa masuk satu paket. Objek di dalam blok model besar (merged) digambar sebagai overlay berwarna di atas blok; model lain diwarnai langsung.
+4. **Timeline:** slider / play (1-8 hari per detik), *Dim the rest of the model* (X-ray untuk yang belum dipetakan), *Hide not-started packages* (objek belum mulai disembunyikan), *Play & record* menyimpan video MP4/WebM.
+5. **Overall %** = rata-rata biasa dari % tiap aktivitas (tanpa bobot biaya / manhour; baris "summary" tidak ikut). Untuk S-curve berbobot, tambahkan kolom bobot di export XLSX atau minta baseline schedule (P6) — rencana berikutnya: kurva *planned vs actual*.
+
+Format CSV (long): `date;package;activity;unit;bq;progress` (+ `package_id`, `area` opsional), sheet **Long** di export XLSX bisa disimpan sebagai CSV dan di-import kembali. Semua data tersimpan di perangkat (IndexedDB) dan ikut **Backup / Restore**.

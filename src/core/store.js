@@ -92,7 +92,7 @@ export async function exportProject(pid) {
   const project = await db.get('projects', pid);
   const out = { format: 'nexus3d-backup', version: 1, exported: new Date().toISOString(), project };
   const files = {};
-  for (const s of ['deliverables', 'viewpoints', 'clashtests']) out[s] = await db.byProject(s, pid);
+  for (const s of ['deliverables', 'viewpoints', 'clashtests', 'progress']) out[s] = await db.byProject(s, pid);
   out.plotplans = [];
   for (const pp of await db.byProject('plotplans', pid)) {
     const { pdf, ...rest } = pp;
@@ -118,7 +118,7 @@ export async function importProject(file) {
   const pid = exists ? uid('p') : data.project.id;
   const remap = (r) => ({ ...r, id: exists ? uid(r.id[0]) : r.id, projectId: pid });
   await db.put('projects', { ...data.project, id: pid, name: exists ? `${data.project.name} (restored)` : data.project.name });
-  for (const s of ['deliverables', 'viewpoints', 'clashtests']) for (const r of data[s] || []) await db.put(s, remap(r));
+  for (const s of ['deliverables', 'viewpoints', 'clashtests', 'progress']) for (const r of data[s] || []) await db.put(s, remap(r));
   for (const pp of data.plotplans || []) {
     const { pdfPath, ...rest } = pp;
     await db.put('plotplans', { ...remap(rest), pdf: pdfPath && z[pdfPath] ? new Blob([z[pdfPath]], { type: 'application/pdf' }) : null });

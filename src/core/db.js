@@ -1,7 +1,7 @@
 // IndexedDB store — offline-first, everything stays on the device (blobs included).
 const DB_NAME = 'nexus3d';
-const DB_VER = 2; // v2: conversion jobs
-const STORES = ['projects', 'deliverables', 'models', 'plotplans', 'viewpoints', 'clashtests', 'jobs'];
+const DB_VER = 3; // v2: conversion jobs, v3: 4D progress
+const STORES = ['projects', 'deliverables', 'models', 'plotplans', 'viewpoints', 'clashtests', 'jobs', 'progress'];
 
 let _db;
 let memoryFallback = null; // used when IndexedDB is unavailable (private mode, sandboxed preview)
