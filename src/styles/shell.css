@@ -394,3 +394,9 @@ kbd { font: 500 11.5px/1 var(--f-mono); padding: 4px 6px; border-radius: 7px; ba
 .p4-g-now { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff4d8d; left: calc(158px + (100% - 158px) * var(--now-k, 0)); }
 .p4-f-gantt { --now-k: 0; }
 @media (max-width: 720px) { .p4-f-ops { display: none; } .p4-g-row { grid-template-columns: 90px 1fr; } .p4-g-now { left: calc(98px + (100% - 98px) * var(--now-k, 0)); } }
+
+.p4-gh { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 4px 0; font: 500 13px/1 var(--f-ui); color: var(--fg-2); }
+.p4-gh::-webkit-details-marker { display: none; }
+.p4-gh::before { content: '▾'; font-size: 11px; transition: transform .15s; }
+details.p4-grp:not([open]) > .p4-gh::before { transform: rotate(-90deg); }
+.p4-gn { flex: 1; color: var(--fg-1); }
