@@ -64,6 +64,7 @@ export async function renderReview(main, project) {
           const objects = await readObjects(w.rec.files); // names of the single objects inside a merged heavy model
           viewer.addLayer({ id, name: w.rec.name, kind: 'import', object, units: UNIT_SCALE[w.rec.units] || 1, zUp: !!w.rec.zUp, transform: w.rec.transform || {}, objects });
           viewer.setLayerVisible(id, w.rec.visible !== false);
+          await autoPlace(viewer.layers.get(id), w.rec);
         }
         viewer.layersVer[id] = w.rec.updated;
       } catch (e) {
@@ -216,6 +217,7 @@ export async function renderReview(main, project) {
     await db.put('models', rec);
     viewer.addLayer({ id: rec.id, name: rec.name, kind: 'import', object, units: UNIT_SCALE[rec.units], zUp: rec.zUp });
     viewer.layersVer[rec.id] = rec.updated;
+    await autoPlace(viewer.layers.get(rec.id), rec);
     viewer.fit();
     toast(`${rec.name} added (${fmt.int(viewer.layers.get(rec.id).meshes.length)} objects).`, 'ok');
     renderPanel(); corner();
@@ -309,9 +311,27 @@ export async function renderReview(main, project) {
     viewer.layersVer[L.id] = rec.updated;
     renderPanel();
   }
+  // A model whose main body sits far from the plot plan (converter origin pulled off by stray objects, or real
+  // site coordinates) is moved once so its main body — not the strays — lands on the plot plan origin.
+  async function autoPlace(L, rec) {
+    if (!L || !rec || rec.autoPlaced) return;
+    const t = rec.transform || {};
+    if (t.dx || t.dz || t.rotY) { rec.autoPlaced = true; await db.put('models', rec); viewer.layersVer[L.id] = rec.updated; return; }
+    const box = viewer.boundsOf(L.meshes, { robust: true });
+    if (box.isEmpty()) return;
+    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+    rec.autoPlaced = true;
+    if (Math.hypot(c.x, c.z) > Math.max(25, 0.25 * Math.max(size.x, size.z))) {
+      rec.transform = { dx: -Math.round(c.x), dy: t.dy || 0, dz: -Math.round(c.z), rotY: 0 };
+      viewer.applyLayerTransform(L.id, { transform: rec.transform });
+      toast(`${rec.name}: model was ${fmt.int(Math.hypot(c.x, c.z))} m from the plot plan — moved onto it. Fine-tune in layer settings.`, 'info', 'Auto-placed');
+    }
+    await db.put('models', rec);
+    viewer.layersVer[L.id] = rec.updated;
+  }
   async function centerLayer(L) {
     const rec = await db.get('models', L.id);
-    const c = viewer.boundsOf(L.meshes).getCenter(new THREE.Vector3());
+    const c = viewer.boundsOf(L.meshes, { robust: true }).getCenter(new THREE.Vector3());
     const t = rec.transform || { dx: 0, dy: 0, dz: 0, rotY: 0 };
     t.dx = (t.dx || 0) - c.x; t.dz = (t.dz || 0) - c.z;
     rec.transform = t;
