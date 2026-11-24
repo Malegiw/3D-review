@@ -80,8 +80,13 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const r = routeOrder(items.map((x) => x.c));
     items.forEach((x, i) => { x.d = r[i]; });
     items.sort((a, b) => a.y - b.y || a.d - b.d);
-    const cum = [0];
-    for (const x of items) cum.push(cum[cum.length - 1] + x.g.index.count);
+    // a long object (a pipeline string kilometres long is often ONE object) is cut into ~25 m pieces along its own
+    // length, so it is laid progressively instead of popping in whole
+    const cum = [0], boxes = [];
+    for (const x of items) {
+      const pieces = splitLong(x.g);
+      for (const pc of pieces) { cum.push(cum[cum.length - 1] + pc.n); boxes.push(pc.bb); }
+    }
     const geo = items.length === 1 ? items[0].g : mergeGeometries(items.map((x) => x.g), false);
     if (items.length > 1) items.forEach((x) => x.g.dispose());
     const ov = new THREE.Mesh(geo, MAT_GHOST);
@@ -90,9 +95,33 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     ov.frustumCulled = false;
     mesh.add(ov);
     ov.updateWorldMatrix(true, false);
-    o = { mesh, ov, geo, cum, boxes: items.map((x) => x.bb), k: 0 };
+    o = { mesh, ov, geo, cum, boxes, k: 0 };
     overlays.set(id, o);
     return o;
+  }
+  function splitLong(g) {
+    const bb = g.boundingBox, sx = bb.max.x - bb.min.x, sz = bb.max.z - bb.min.z, L = Math.hypot(sx, sz);
+    const idx = g.index, tris = idx.count / 3;
+    if (L < 40 || tris < 24) return [{ n: idx.count, bb: bb.clone() }];
+    const pos = g.attributes.position, a = idx.array;
+    const cx = new Float32Array(tris), cz = new Float32Array(tris), cy = new Float32Array(tris);
+    for (let t = 0; t < tris; t++) {
+      let X = 0, Y = 0, Z = 0;
+      for (let j = 0; j < 3; j++) { const v = a[t * 3 + j]; X += pos.getX(v); Y += pos.getY(v); Z += pos.getZ(v); }
+      cx[t] = X / 3; cy[t] = Y / 3; cz[t] = Z / 3;
+    }
+    const r = routeOrder(Array.from(cx, (x, t) => ({ x, z: cz[t] })));
+    const order = Array.from(r.keys()).sort((p, q) => r[p] - r[q]);
+    const out = new (a.constructor)(a.length);
+    order.forEach((t, i) => { out[i * 3] = a[t * 3]; out[i * 3 + 1] = a[t * 3 + 1]; out[i * 3 + 2] = a[t * 3 + 2]; });
+    idx.array.set(out); idx.needsUpdate = true;
+    const pieces = Math.min(200, Math.max(2, Math.round(L / 25))), per = Math.ceil(tris / pieces), res = [];
+    for (let i = 0; i < tris; i += per) {
+      const e = Math.min(tris, i + per), b = new THREE.Box3();
+      for (let j = i; j < e; j++) { const t = order[j]; b.expandByPoint(new THREE.Vector3(cx[t], cy[t], cz[t])); }
+      res.push({ n: (e - i) * 3, bb: b });
+    }
+    return res;
   }
   function growOverlay(o, pct) {
     const n = o.cum.length - 1;
@@ -413,6 +442,21 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     if (v > 0) rec.weights[p.id] = v; else delete rec.weights[p.id];
     await save(); rebuild(); render();
   }
+  // terrain, site pads and ROW strips: big flat surfaces that would paint the whole screen — context, not built work
+  function isGround(mesh, k) {
+    const { start } = mesh.userData.objs, idx = mesh.geometry.index.array, pos = mesh.geometry.attributes.position;
+    let y0 = Infinity, y1 = -Infinity, flat = 0;
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), n = new THREE.Vector3();
+    for (let i = start[k] * 3, e = start[k + 1] * 3; i < e; i += 3) {
+      A.fromBufferAttribute(pos, idx[i]); B.fromBufferAttribute(pos, idx[i + 1]); C.fromBufferAttribute(pos, idx[i + 2]);
+      y0 = Math.min(y0, A.y, B.y, C.y); y1 = Math.max(y1, A.y, B.y, C.y);
+      n.subVectors(B, A).cross(C.clone().sub(A));
+      const area = n.length() / 2;
+      if (area > 0 && Math.abs(n.y) / (2 * area) > 0.9) flat += area;
+    }
+    const sc = mesh.matrixWorld.getMaxScaleOnAxis();
+    return flat * sc * sc > 2 * 1500 && (y1 - y0) * sc < 3; // both faces of a slab count, hence 2 ×
+  }
   async function runAutoMap(reverse = false) {
     const descs = [];
     const box = new THREE.Box3(), c = new THREE.Vector3();
@@ -427,21 +471,28 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const blocks = viewer.meshes({ visibleOnly: false }).filter((m) => m.userData.objs);
     const taken = new Set();
     let byHint = 0;
-    for (const p of model.pkgs) {
+    // two passes: specific hints first, then fall-back terms written as *term (whatever is left in a layer)
+    const hits = new Map();
+    for (const pass of [0, 1]) for (const p of model.pkgs) {
       if (!p.hint) continue;
-      const found = [];
-      for (const q of p.hint.split('|').map((x) => x.trim()).filter(Boolean)) {
+      const found = hits.get(p.id) || [];
+      for (let q of p.hint.split('|').map((x) => x.trim()).filter(Boolean)) {
+        if (q.startsWith('*') !== (pass === 1)) continue;
+        q = q.replace(/^\*/, '');
         for (const it of searchObjects(blocks, q, 50000).items) {
           const o = it.mesh.userData.objs;
           if (/existing/i.test(o.table.layers[o.ly[it.k]] || '')) continue; // what is already there is not built
           const id = `${it.mesh.userData.key}|${it.k}`;
           if (taken.has(id)) continue;
-          taken.add(id); found.push({ key: it.mesh.userData.key, k: it.k });
+          taken.add(id);
+          if (isGround(it.mesh, it.k)) continue; // terrain / site pad: context, not something that gets built
+          found.push({ key: it.mesh.userData.key, k: it.k });
         }
-        for (const m of viewer.meshes({ visibleOnly: false })) if (!m.userData.objs && !m.userData.ground && displayName(m).toLowerCase().includes(q.toLowerCase()) && !taken.has(m.userData.key)) { taken.add(m.userData.key); found.push({ key: m.userData.key }); }
+        if (pass === 0) for (const m of viewer.meshes({ visibleOnly: false })) if (!m.userData.objs && !m.userData.ground && displayName(m).toLowerCase().includes(q.toLowerCase()) && !taken.has(m.userData.key)) { taken.add(m.userData.key); found.push({ key: m.userData.key }); }
       }
-      if (found.length) { map[p.id] = found; byHint++; }
+      if (found.length) hits.set(p.id, found);
     }
+    for (const [id, found] of hits) { map[id] = found; byHint++; }
     if (byHint) notes.push(`${byHint} packages matched by name`);
     const ids = Object.keys(map);
     if (!ids.length) return toast('Nothing recognised in this model.', 'warn', 'Auto-map');
@@ -613,7 +664,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       sCurve(),
       planL,
       h('div', { class: 'p4-opts' },
-        h('label', { class: 'p4-speed' }, 'Speed', h('select', { class: 'inp', onchange: (e) => { opts.speed = +e.target.value; saveOpts(); } }, [[1, '1 day/s'], [2, '2 days/s'], [4, '4 days/s'], [8, '8 days/s']].map(([v, l]) => h('option', { value: v, selected: v === opts.speed }, l)))),
+        h('label', { class: 'p4-speed' }, 'Speed', h('select', { class: 'inp', onchange: (e) => { opts.speed = +e.target.value; saveOpts(); } }, [[1, '1 day/s'], [2, '2 days/s'], [4, '4 days/s'], [8, '8 days/s'], [16, '16 days/s']].map(([v, l]) => h('option', { value: v, selected: v === opts.speed }, l)))),
         chk('Build the model up as progress advances', 'seq', redraw),
         chk('Start from an empty site at the first report', 'fromZero', redraw),
         chk('Camera follows the active work', 'follow'),
