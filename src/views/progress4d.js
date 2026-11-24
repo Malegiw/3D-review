@@ -260,10 +260,57 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       });
     });
   }
+  // ---------- panels burned into the recorded video (same content as the on-screen panels) ----------
+  function paintOverlay(ctx, W, H, dpr) {
+    if (!model) return;
+    const s = Math.max(1, Math.min(W / 1280, H / 720) * 1.15), n = N(), di = Math.min(n - 1, Math.round(t));
+    const F = (w, px) => `${w} ${Math.round(px * s)}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
+    const box = (x, y, w, h) => { ctx.fillStyle = 'rgba(10,14,22,0.74)'; ctx.beginPath(); ctx.roundRect(x, y, w, h, 10 * s); ctx.fill(); };
+    const clip = (txt, w) => { let t2 = String(txt); while (t2.length > 3 && ctx.measureText(t2).width > w) t2 = t2.slice(0, -2); return t2 === String(txt) ? t2 : t2 + '…'; };
+    const pad = 14 * s;
+    // title bar: project · date · progress (· plan)
+    const ov = pctAt(model.overall, t);
+    const plan = model.plan ? pctAt(model.plan, t) : null;
+    const title = `${project.name || project.code || 'Project'}  ·  ${fmt.date(model.dates[di])}`;
+    const sub = `Progress ${pct1(ov)}${plan != null ? `  ·  plan ${pct1(pctAt(model.plan, t))}  ·  ${pctAt(model.plan.actual, t) - plan >= 0 ? 'ahead' : 'behind'} ${Math.abs(pctAt(model.plan.actual, t) - plan).toFixed(1)}%` : ''}  ·  day ${di + 1}/${n}`;
+    ctx.font = F(600, 18); const tw = Math.max(ctx.measureText(title).width, (ctx.font = F(400, 13), ctx.measureText(sub).width)) + pad * 2;
+    box(pad, pad, tw, 58 * s);
+    ctx.fillStyle = '#fff'; ctx.font = F(600, 18); ctx.fillText(title, pad * 2, pad + 26 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = F(400, 13); ctx.fillText(sub, pad * 2, pad + 47 * s);
+    // overall bar
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(pad, pad + 62 * s, tw, 5 * s);
+    ctx.fillStyle = '#2fbf71'; ctx.fillRect(pad, pad + 62 * s, tw * ov / 100, 5 * s);
+    // active operations (right)
+    const ops = [];
+    for (const p of model.pkgs) if (!p.summary) for (const a of activitiesAt(p, di)) if (a.pct - a.was > 0.05 && !a.dropped) ops.push({ p, a, d: a.pct - a.was });
+    ops.sort((x, y) => y.d - x.d);
+    const lead = ops[0], ow = 330 * s, oh = (40 + Math.min(7, ops.length) * 21) * s, ox = W - ow - pad;
+    box(ox, pad, ow, oh);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText(`CURRENT STAGE · ${clip(lead ? lead.p.name : 'Mobilisation', ow - 140 * s).toUpperCase()}`, ox + pad, pad + 22 * s);
+    ops.slice(0, 7).forEach(({ a, d }, i) => {
+      const y = pad + (44 + i * 21) * s;
+      ctx.font = F(400, 13); ctx.fillStyle = '#fff'; ctx.fillText(clip(a.desc, ow - 90 * s), ox + pad, y);
+      ctx.fillStyle = '#5fe39a'; ctx.textAlign = 'right'; ctx.fillText(`+${d.toFixed(d < 10 ? 1 : 0)}%`, ox + ow - pad, y); ctx.textAlign = 'left';
+    });
+    // build sequence (bottom-left)
+    const sp = spans().filter(({ p, z }) => z == null ? pctAt(p.curve, t) < DONE_AT : z >= di - 1).slice(0, 8);
+    if (!sp.length) return;
+    const gw = Math.min(W * 0.55, 620 * s), gh = (34 + sp.length * 16) * s, gx = pad, gy = H - gh - pad, nw = 170 * s, bx = gx + pad + nw, bw = gw - pad * 2 - nw;
+    box(gx, gy, gw, gh);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText('BUILD SEQUENCE', gx + pad, gy + 20 * s);
+    sp.forEach(({ p, a, z }, i) => {
+      const y = gy + (30 + i * 16) * s, end = z ?? n - 1;
+      ctx.fillStyle = di >= a ? '#fff' : 'rgba(255,255,255,0.5)'; ctx.font = F(400, 11); ctx.fillText(clip(p.name, nw - 8 * s), gx + pad, y + 9 * s);
+      const x0 = bx + bw * a / n, w0 = Math.max(2, bw * (end - a + 1) / n);
+      ctx.fillStyle = 'rgba(245,184,46,0.35)'; ctx.fillRect(x0, y, w0, 9 * s);
+      ctx.fillStyle = '#2fbf71'; ctx.fillRect(x0, y, w0 * pctAt(p.curve, t) / 100, 9 * s);
+    });
+    ctx.fillStyle = '#ff4d8d'; ctx.fillRect(bx + bw * Math.min(t, n - 1) / Math.max(1, n - 1), gy + 26 * s, 2 * s, gh - 32 * s);
+  }
   async function playRecord() {
     if (!model || N() < 2) return;
     let mime;
-    try { mime = viewer.startRecording(); } catch (e) { return toast(e.message, 'err'); }
+    try { mime = viewer.startRecording(30, { overlay: opts.hud ? paintOverlay : null }); } catch (e) { return toast(e.message, 'err'); }
     recording = true; updateLive();
     await play(0);
     await new Promise((r) => setTimeout(r, 800)); // hold the last frame
@@ -323,6 +370,20 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     rebuild(true);
     toast(`${n} report day${n > 1 ? 's' : ''} added${skipped ? `, ${skipped} skipped` : ''}. ${model.pkgs.length} work packages, ${model.count} activities.`, 'ok', '4D data');
     refresh();
+  }
+  async function loadDemo() {
+    const base = (p) => new URL(`samples/seruni/${p}`, document.baseURI).href;
+    try {
+      viewer.setHud('Loading demo data', 'Seruni Waterflood (simulated)');
+      const [csv, bl] = await Promise.all(['Seruni_WF_daily_report_SIMULASI.csv', 'Seruni_WF_baseline_SIMULASI.csv'].map((f) => fetch(base(f)).then((r) => { if (!r.ok) throw new Error(`${f}: HTTP ${r.status}`); return r.text(); })));
+      rec.reports = mergeReports(rec.reports, reportsFromCSV(csv));
+      rebuild(true);
+      rec.baseline = baselineFromCSV(bl, model.pkgs).baseline;
+      await save(); clearVisuals(); rebuild(true);
+      viewer.setHud('');
+      toast(`Demo loaded: ${model.dates.length} days, ${model.pkgs.length} packages (SIMULATED data, not a contractor report).`, 'ok', '4D demo');
+      if (viewer.layers.size) await runAutoMap(false); else refresh();
+    } catch (e) { viewer.setHud(''); toast(e.message, 'err', 'Demo data'); }
   }
   async function exportXlsx() {
     if (!model) return;
@@ -517,6 +578,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
         h('div', { class: 'mto-empty' }, icon('film'),
           h('p', {}, 'Import the contractor’s Daily Activity Report PDFs (one per day). Progress per work package is read from the BQ table, then coloured on the 3D model and played day by day.')),
         h('button', { class: 'btn primary', style: { width: '100%' }, onclick: importFiles }, icon('upload'), 'Import daily report PDF / CSV'),
+        h('button', { class: 'btn', style: { width: '100%' }, onclick: loadDemo }, icon('film'), 'Load demo: Seruni WF (simulated)'),
         h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'Everything stays on this device. CSV format: date, package, activity, unit, bq, progress (long format; the XLSX export has a Long sheet you can re-import as CSV).'));
       return;
     }
