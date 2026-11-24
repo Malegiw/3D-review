@@ -34,6 +34,8 @@ Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (
 - **Auto-map pipes:** pipe nodes (`MGNO-…`) are split into the header segments along the route; support nodes → pipe-support piling. *Flip segment order* if segment 1 is at the other end.
 - **Plan vs actual:** import a baseline CSV (`package, start, finish`); the S-curve shows the plan (dashed) and ahead/behind.
 - **Weights:** per-package weight for the overall % (default = number of activities).
+- **Video with panels:** *Play & record* burns the title (project, date, progress vs plan), active operations and build sequence into the video.
+- **Demo data:** *Load demo: Seruni WF (simulated)* loads simulated daily reports + baseline and auto-maps them (data/seruni, not a contractor report).
 - Offplot/Onplot groups collapse; packages or whole groups can be removed from 4D and restored.
 
 ## Jalankan lokal

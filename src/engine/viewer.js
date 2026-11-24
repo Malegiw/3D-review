@@ -180,6 +180,14 @@ export class Viewer {
       this._dirty = false;
       this.renderer.render(this.scene, this.camera);
       this._updateLabels();
+      const R = this._rec;
+      if (R?.comp) {
+        const gl = this.renderer.domElement, c = R.comp;
+        if (c.width !== gl.width || c.height !== gl.height) { c.width = gl.width; c.height = gl.height; }
+        const ctx = c.getContext('2d');
+        ctx.drawImage(gl, 0, 0);
+        try { R.overlay(ctx, c.width, c.height, this.renderer.getPixelRatio()); } catch (e) { console.warn(e); }
+      }
     }
   }
   addTicker(fn) { this.tickers.add(fn); this.requestRender(); return () => this.tickers.delete(fn); }
@@ -655,17 +663,21 @@ export class Viewer {
     }
   }
 
-  startRecording(fps = 30) {
+  startRecording(fps = 30, { overlay = null } = {}) {
     const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
     const mime = types.find((t) => window.MediaRecorder?.isTypeSupported?.(t));
     if (!mime) throw new Error('This browser cannot record video (MediaRecorder unsupported).');
-    const stream = this.renderer.domElement.captureStream(fps);
+    // with an overlay painter the video is composited on a 2D canvas so on-screen panels end up in the file too
+    const gl = this.renderer.domElement;
+    let comp = null;
+    if (overlay) { comp = document.createElement('canvas'); comp.width = gl.width; comp.height = gl.height; }
+    const stream = (comp || gl).captureStream(fps);
     const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
     const chunks = [];
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     this._force++;
     rec.start(250);
-    this._rec = { rec, chunks, mime };
+    this._rec = { rec, chunks, mime, comp, overlay };
     return mime;
   }
   stopRecording() {
