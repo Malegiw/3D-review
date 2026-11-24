@@ -36,6 +36,8 @@ Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (
 - **Weights:** per-package weight for the overall % (default = number of activities).
 - **Video with panels:** *Play & record* burns the title (project, date, progress vs plan), active operations and build sequence into the video.
 - **Demo data:** *Load demo: Seruni WF (simulated)* loads simulated daily reports + baseline and auto-maps them (data/seruni, not a contractor report).
+- **Weekly report:** *Weekly report* builds a printable A4 report for the week ending at the slider date — KPIs (actual, plan, deviation, SPI, manpower), forecast finish, S-curve with manpower, 3D pictures of what is built, package table, work progressed this week with quantities, 2-week look-ahead and issues. Print → Save as PDF.
+- Package rows show the planned % (amber tick) and deviation; the S-curve shows manpower bars. The 4D panel, overlays and report follow the ID/EN switch.
 - Offplot/Onplot groups collapse; packages or whole groups can be removed from 4D and restored.
 
 ## Jalankan lokal

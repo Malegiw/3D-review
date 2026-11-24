@@ -628,8 +628,8 @@ export class Viewer {
   }
 
   /** A picture of the whole model from the default angle, cropped to `aspect`, for the project card. The live camera is untouched. */
-  coverShot(width = 640, aspect = 1.6) {
-    const box = this.boundsOf(null, { robust: true });
+  coverShot(width = 640, aspect = 1.6, frame = null) {
+    const box = frame && !frame.isEmpty() ? frame : this.boundsOf(null, { robust: true });
     if (box.isEmpty()) return null;
     const cam = this.camera;
     const keep = { p: cam.position.clone(), q: cam.quaternion.clone(), near: cam.near, far: cam.far };

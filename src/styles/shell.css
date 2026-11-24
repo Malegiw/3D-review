@@ -404,3 +404,7 @@ details.p4-grp:not([open]) > .p4-gh::before { transform: rotate(-90deg); }
 .p4-plan { font-size: 11px; margin: 2px 0 6px; min-height: 14px; }
 .p4-w { display: flex; align-items: center; gap: 8px; padding: 6px 0 2px; font-size: 11px; }
 .p4-w input { width: 72px; }
+
+.p4-bar { position: relative; overflow: visible; }
+.p4-planmark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--amber, #f5b82e); border-radius: 1px; text-decoration: none; }
+.p4-dev { display: block; font-size: 10.5px; margin-top: 3px; color: var(--fg-2); }

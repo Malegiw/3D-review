@@ -12,6 +12,8 @@ import { displayName } from '../engine/groups.js';
 import { baselineFromCSV } from '../engine/progress4d.js';
 import { createSequence } from '../engine/sequence4d.js';
 import { autoMap, routeOrder } from '../engine/automap.js';
+import { weeklyReportHtml } from '../engine/report4d.js';
+import { currentLang, t as tr } from '../core/i18n.js';
 
 const OPT_KEY = 'r3d-4d';
 const AMBER = new THREE.Color(0xf5b82e), GREEN = new THREE.Color(0x2fbf71);
@@ -301,7 +303,10 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const ov = pctAt(model.overall, t);
     const plan = model.plan ? pctAt(model.plan, t) : null;
     const title = `${project.name || project.code || 'Project'}  ·  ${fmt.date(model.dates[di])}`;
-    const sub = `Progress ${pct1(ov)}${plan != null ? `  ·  plan ${pct1(pctAt(model.plan, t))}  ·  ${pctAt(model.plan.actual, t) - plan >= 0 ? 'ahead' : 'behind'} ${Math.abs(pctAt(model.plan.actual, t) - plan).toFixed(1)}%` : ''}  ·  day ${di + 1}/${n}`;
+    const ID = currentLang() === 'id', dv = plan != null ? pctAt(model.plan.actual, t) - plan : 0;
+    const sub = ID
+      ? `Progres ${pct1(ov)}${plan != null ? `  ·  rencana ${pct1(plan)}  ·  ${dv >= 0 ? 'lebih cepat' : 'terlambat'} ${Math.abs(dv).toFixed(1)}%` : ''}  ·  hari ${di + 1}/${n}`
+      : `Progress ${pct1(ov)}${plan != null ? `  ·  plan ${pct1(plan)}  ·  ${dv >= 0 ? 'ahead' : 'behind'} ${Math.abs(dv).toFixed(1)}%` : ''}  ·  day ${di + 1}/${n}`;
     ctx.font = F(600, 18); const tw = Math.max(ctx.measureText(title).width, (ctx.font = F(400, 13), ctx.measureText(sub).width)) + pad * 2;
     box(pad, pad, tw, 58 * s);
     ctx.fillStyle = '#fff'; ctx.font = F(600, 18); ctx.fillText(title, pad * 2, pad + 26 * s);
@@ -315,7 +320,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     ops.sort((x, y) => y.d - x.d);
     const lead = ops[0], ow = 330 * s, oh = (40 + Math.min(7, ops.length) * 21) * s, ox = W - ow - pad;
     box(ox, pad, ow, oh);
-    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText(`CURRENT STAGE · ${clip(lead ? lead.p.name : 'Mobilisation', ow - 140 * s).toUpperCase()}`, ox + pad, pad + 22 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText(`${tr('Current stage').toUpperCase()} · ${clip(lead ? lead.p.name : tr('Mobilisation'), ow - 140 * s).toUpperCase()}`, ox + pad, pad + 22 * s);
     ops.slice(0, 7).forEach(({ a, d }, i) => {
       const y = pad + (44 + i * 21) * s;
       ctx.font = F(400, 13); ctx.fillStyle = '#fff'; ctx.fillText(clip(a.desc, ow - 90 * s), ox + pad, y);
@@ -326,7 +331,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     if (!sp.length) return;
     const gw = Math.min(W * 0.55, 620 * s), gh = (34 + sp.length * 16) * s, gx = pad, gy = H - gh - pad, nw = 170 * s, bx = gx + pad + nw, bw = gw - pad * 2 - nw;
     box(gx, gy, gw, gh);
-    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText('BUILD SEQUENCE', gx + pad, gy + 20 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText(tr('Build sequence').toUpperCase(), gx + pad, gy + 20 * s);
     sp.forEach(({ p, a, z }, i) => {
       const y = gy + (30 + i * 16) * s, end = z ?? n - 1;
       ctx.fillStyle = di >= a ? '#fff' : 'rgba(255,255,255,0.5)'; ctx.font = F(400, 11); ctx.fillText(clip(p.name, nw - 8 * s), gx + pad, y + 9 * s);
@@ -400,6 +405,42 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     toast(`${n} report day${n > 1 ? 's' : ''} added${skipped ? `, ${skipped} skipped` : ''}. ${model.pkgs.length} work packages, ${model.count} activities.`, 'ok', '4D data');
     refresh();
   }
+  async function weeklyReport() {
+    if (!model) return;
+    stop();
+    const di = Math.round(t);
+    setT(di);
+    const images = [];
+    try {
+      // frame what has been built so far on the main site (remote tie-ins and terrain left out), from the usual 3/4 angle:
+      // the plant (onplot) close up, and everything built including offplot pipelines
+      const site = viewer.boundsOf(null, { robust: true }).clone().expandByScalar(30);
+      const all = new THREE.Box3(), xs = [], zs = [], ys = [];
+      for (const o of overlays.values()) for (let i = 0; i < o.k; i++) {
+        const b = o.boxes[i].clone().applyMatrix4(o.mesh.matrixWorld), c = b.getCenter(new THREE.Vector3());
+        if (!site.containsPoint(c)) continue;
+        all.union(b); xs.push(c.x); zs.push(c.z); ys.push(b.min.y, b.max.y);
+      }
+      // close-up: the central 70 % of the built objects (where the plant is), whole: everything built so far
+      const q = (arr, f) => { const v = [...arr].sort((m, n) => m - n); return v[Math.min(v.length - 1, Math.max(0, Math.floor(f * (v.length - 1))))]; };
+      const core = xs.length > 20 ? new THREE.Box3(new THREE.Vector3(q(xs, 0.15), q(ys, 0.02), q(zs, 0.15)), new THREE.Vector3(q(xs, 0.85), q(ys, 0.98), q(zs, 0.85))).expandByScalar(12) : null;
+      const cap = `${fmt.date(model.dates[di])} · ${pct1(pctAt(model.overall, di))}`;
+      const two = core && all.getSize(new THREE.Vector3()).length() > core.getSize(new THREE.Vector3()).length() * 1.6;
+      const s1 = viewer.coverShot(1600, two ? 1.45 : 1.9, core || (all.isEmpty() ? null : all.clone().expandByScalar(8)));
+      if (s1) images.push({ src: s1, caption: `${two ? (currentLang() === 'id' ? 'Area utama · ' : 'Main area · ') : ''}${cap}` });
+      if (two) { const s2 = viewer.coverShot(1600, 1.45, all.clone().expandByScalar(10)); if (s2) images.push({ src: s2, caption: `${currentLang() === 'id' ? 'Keseluruhan' : 'Whole site'} · ${cap}` }); }
+    } catch (e) { console.warn(e); }
+    const html = weeklyReportHtml(model, di, {
+      project: project.name || project.code || '', lang: currentLang(), simulated: !!rec.demo, images, dateFmt: (d) => fmt.date(d),
+    });
+    const name = `Laporan-mingguan_${(project.code || project.name || 'proyek').replace(/[^\w-]+/g, '_')}_${model.dates[di]}.html`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, '_blank');
+    if (!w) download(blob, name); // pop-up blocked: hand over the file instead
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    toast('Weekly report opened — use Print → Save as PDF.', 'ok', 'Weekly report');
+  }
   async function loadDemo() {
     const base = (p) => new URL(`samples/seruni/${p}`, document.baseURI).href;
     try {
@@ -408,6 +449,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       rec.reports = mergeReports(rec.reports, reportsFromCSV(csv));
       rebuild(true);
       rec.baseline = baselineFromCSV(bl, model.pkgs).baseline;
+      rec.demo = true;
       await save(); clearVisuals(); rebuild(true);
       viewer.setHud('');
       toast(`Demo loaded: ${model.dates.length} days, ${model.pkgs.length} packages (SIMULATED data, not a contractor report).`, 'ok', '4D demo');
@@ -421,7 +463,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   async function clearData() {
     if (!(await confirmDialog('Remove all imported reports and the object mapping of this project?', { title: 'Clear 4D data', okLabel: 'Clear', danger: true }))) return;
     stop(); clearVisuals();
-    rec.reports = {}; rec.map = {}; rec.baseline = {}; rec.weights = {}; rec.removed = [];
+    rec.reports = {}; rec.map = {}; rec.baseline = {}; rec.weights = {}; rec.removed = []; rec.demo = false;
     await save();
     rebuild();
     refresh();
@@ -499,7 +541,8 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     for (const id of ids) rec.map[id] = map[id];
     rec.autoReverse = reverse;
     await save(); seqReady = false; redraw(); render();
-    toast(`${notes.join(' · ')}. Check the order of segments; flip it if segment 1 is at the other end.`, 'ok', 'Auto-mapped');
+    const segs = notes.some((x) => /header segments/.test(x));
+    toast(`${notes.join(' · ')}.${segs ? ' Check the order of segments; flip it if segment 1 is at the other end.' : ''}`, 'ok', 'Auto-mapped');
   }
   function selectionTargets() {
     const po = viewer.pickedObj;
@@ -579,7 +622,11 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     };
     live.push(move);
     move();
+    const mpv = model.manpower, mpMax = Math.max(0, ...mpv.filter((v) => v != null));
+    const bw = Math.max(0.6, (W - 2 * P) / n - 0.4);
+    const mpBars = mpMax ? mpv.map((v, i) => (v == null ? null : h('rect', { svg: true, x: (xs(i) - bw / 2).toFixed(1), y: (H - P - (H - 2 * P) * 0.32 * v / mpMax).toFixed(1), width: bw.toFixed(1), height: ((H - 2 * P) * 0.32 * v / mpMax).toFixed(1), fill: 'var(--fg-3, #8b95a7)', opacity: 0.28 }))) : [];
     return h('svg', { svg: true, class: 'p4-curve', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Overall progress ${pct1(model.overall[0])} to ${pct1(model.overall[n - 1])}` },
+      mpBars,
       [0, 50, 100].map((g) => h('line', { svg: true, x1: P, x2: W - P, y1: ys(g), y2: ys(g), stroke: 'var(--line)', 'stroke-width': 1 })),
       h('polygon', { svg: true, points: `${xs(0)},${ys(0)} ${pts.join(' ')} ${xs(n - 1)},${ys(0)}`, fill: 'var(--cyan)', opacity: 0.1 }),
       h('polyline', { svg: true, points: pts.join(' '), fill: 'none', stroke: 'var(--cyan)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }),
@@ -589,11 +636,18 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   function pkgRow(p) {
     const n = targets(p.id).length;
     const bar = h('i'), val = h('b', { class: 'mono' }), dot = h('span', { class: 'p4-dot' });
+    const mark = p.plan ? h('u', { class: 'p4-planmark' }) : null, devL = p.plan ? h('span', { class: 'mono p4-dev' }) : null;
     const upd = () => {
       const v = pctAt(p.curve, t), st = stateOf(v);
       bar.style.width = `${v}%`; bar.style.background = STATE_VAR[st];
       dot.style.background = STATE_VAR[st];
       val.textContent = pct1(v);
+      if (mark) {
+        const pl = pctAt(p.plan, t), d = v - pl;
+        mark.style.left = `${pl}%`;
+        devL.textContent = `plan ${pct1(pl)} · ${Math.abs(d) < 1 ? 'on plan' : d > 0 ? `+${d.toFixed(1)}%` : `${d.toFixed(1)}%`}`;
+        devL.style.color = d < -1 ? 'var(--red, #e5484d)' : d > 1 ? 'var(--green, #2fbf71)' : '';
+      }
     };
     live.push(upd); upd();
     const acts = h('div', { class: 'p4-acts' });
@@ -607,7 +661,8 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     return h('details', { class: `p4-pkg ${n ? 'mapped' : ''}`, ontoggle: (e) => { if (e.target.open) fill(); } },
       h('summary', {},
         h('div', { class: 'p4-top' }, dot, h('span', { class: 'p4-name' }, p.name), val),
-        h('div', { class: 'progress p4-bar' }, bar),
+        h('div', { class: 'progress p4-bar' }, bar, mark),
+        devL,
         h('div', { class: 'p4-sub' },
           h('span', { class: 'dim2' }, n ? `${fmt.int(n)} object${n > 1 ? 's' : ''} mapped` : 'Not mapped · tap ◎ to assign the selection'),
           h('span', { class: 'p4-tools' },
@@ -640,6 +695,9 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const rec$ = h('button', { class: 'btn sm mag', onclick: playRecord }, h('span', { class: 'rec-dot' }), 'Play & record');
     const conc = h('div', { class: 'p4-conc' });
     const planL = h('div', { class: 'p4-plan mono' });
+    const repLbl = h('span');
+    const repBtn = h('button', { class: 'btn primary', style: { width: '100%' }, onclick: weeklyReport }, icon('docs'), repLbl);
+    live.push(() => { const d = model.dates[di()]; repLbl.textContent = `Weekly report · week ${Math.floor((Date.parse(d) - Date.parse(model.dates[0])) / 6048e5) + 1} (${fmt.date(d)})`; });
     live.push((fromSlider) => {
       kpi.textContent = pct1(pctAt(model.overall, t));
       if (model.plan) {
@@ -685,6 +743,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       (rec.removed || []).length ? h('button', { class: 'btn sm ghost', onclick: restoreAll }, `Restore removed (${rec.removed.length})`) : null,
       summ.length ? h('details', { class: 'p4-grp' }, h('summary', { class: 'dim2' }, `Summary rows (${summ.length}) — counted in the report, not in the overall %`), summ.map(pkgRow)) : null,
       conc,
+      repBtn,
       h('div', { class: 'btn-row' },
         rec$,
         h('button', { class: 'btn sm', onclick: importBaseline, 'data-tip': 'CSV: package, start, finish' }, icon('upload'), model.plan ? 'Replace baseline' : 'Import baseline (plan)'),
@@ -693,7 +752,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
         h('button', { class: 'btn sm', onclick: importFiles }, icon('upload'), 'Add reports'),
         h('button', { class: 'btn sm', onclick: exportXlsx }, icon('download'), 'XLSX'),
         h('button', { class: 'btn sm ghost', onclick: clearData }, icon('trash'), 'Clear')),
-      h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'Overall % is the plain average of every activity’s reported %, not a cost- or manhour-weighted progress. Map objects first (◎ assigns the current selection).'));
+      h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'Overall % is weighted by package weight (default: number of activities; set a weight in each package). Auto-map links packages to objects by name; ◎ assigns the current selection.'));
     updateLive();
     setT(t);
   }
