@@ -3,7 +3,7 @@ import csv, datetime as dt, math, random
 
 random.seed(133)
 D0 = dt.date(2026, 9, 1)
-TODAY = dt.date(2026, 11, 23)
+END_CAP = dt.date(2027, 4, 30)  # run the reports until every activity reaches 100 %
 d = lambda s: dt.date.fromisoformat(s)
 
 # package_id, area, name, hint (object names/layers in the 3D model), delay (days), activities [(desc, unit, bq, plan start, plan finish)]
@@ -14,7 +14,7 @@ P = [
    ('Site clearing & grubbing', 'm2', 6500, '2026-09-05', '2026-09-25'),
    ('Cut & fill, pemadatan tanah', 'm3', 4200, '2026-09-10', '2026-10-10'),
    ('Site office & laydown area', 'ls', 1, '2026-09-04', '2026-09-20')]),
- ('CIV-FDN', 'ONPLOT', 'Pondasi tank & equipment', 'pondasi|pedestal|fdn', 0, [
+ ('CIV-FDN', 'ONPLOT', 'Pondasi tank & equipment', 'pondasi|pedestal|fdn|wo-133-s/structure|*civil-structure', 0, [
    ('Pemancangan mini pile', 'titik', 96, '2026-09-20', '2026-10-20'),
    ('Galian pondasi', 'm3', 380, '2026-09-25', '2026-10-15'),
    ('Lean concrete', 'm3', 28, '2026-10-01', '2026-10-18'),
@@ -32,11 +32,17 @@ P = [
    ('Pembesian bund wall', 'kg', 14500, '2026-10-25', '2026-11-25'),
    ('Pengecoran bund wall', 'm3', 165, '2026-11-01', '2026-12-05'),
    ('Coating bund wall', 'm2', 620, '2026-12-01', '2026-12-20')]),
- ('CIV-DRN', 'ONPLOT', 'Drainage, jalan & paving', '', 0, [
+ ('CIV-DRN', 'ONPLOT', 'Drainage, jalan & paving', '/drain', 0, [
    ('Saluran drainase U-ditch', 'm', 420, '2026-11-10', '2026-12-20'),
    ('Lapis base course jalan', 'm3', 640, '2026-11-20', '2026-12-30'),
    ('Paving / gravel area plant', 'm2', 3200, '2026-12-10', '2027-01-25')]),
- ('MEC-T0103', 'ONPLOT', 'Tank T-0103', 't-0103', 0, [
+ ('BLDG', 'ONPLOT', 'Control room, MCC room & pos jaga', 'operator_room|security_post|control_room|mcc_room', 0, [
+   ('Pondasi & sloof bangunan', 'm3', 64, '2026-10-20', '2026-11-20'),
+   ('Struktur kolom & balok bangunan', 'm3', 48, '2026-11-15', '2026-12-25'),
+   ('Dinding bata & plester', 'm2', 620, '2026-12-15', '2027-01-25'),
+   ('Atap, plafon & finishing', 'm2', 410, '2027-01-10', '2027-02-15'),
+   ('MEP bangunan (AC, lampu, stop kontak)', 'ls', 1, '2027-01-25', '2027-02-25')]),
+ ('MEC-T0103', 'ONPLOT', 'Tank T-0103', 't-0103|t0103', 0, [
    ('Fabrikasi plat tank T-0103', 'ton', 46, '2026-10-01', '2026-10-30'),
    ('Erection bottom plate T-0103', 'm2', 320, '2026-10-20', '2026-11-05'),
    ('Erection shell course 1-3 T-0103', 'course', 3, '2026-11-01', '2026-11-22'),
@@ -46,7 +52,7 @@ P = [
    ('Radiografi las T-0103', 'film', 240, '2026-11-05', '2027-01-05'),
    ('Hydrotest tank T-0103', 'ls', 1, '2027-01-05', '2027-01-15'),
    ('Coating tank T-0103', 'm2', 1350, '2027-01-10', '2027-02-05')]),
- ('MEC-T0302', 'ONPLOT', 'Tank T-0302', 't-0302|t0302', 4, [
+ ('MEC-T0302', 'ONPLOT', 'Tank T-0302', 't-0302|t0302|_0302|0302b', 4, [
    ('Fabrikasi plat tank T-0302', 'ton', 52, '2026-10-10', '2026-11-10'),
    ('Erection bottom plate T-0302', 'm2', 360, '2026-11-01', '2026-11-18'),
    ('Erection shell course 1-3 T-0302', 'course', 3, '2026-11-15', '2026-12-08'),
@@ -61,7 +67,11 @@ P = [
    ('Erection surge tank T-0301', 'ton', 14, '2026-11-15', '2026-12-15'),
    ('Nozzle & instrument connection T-0301', 'set', 8, '2026-12-10', '2027-01-05'),
    ('Hydrotest & coating T-0301', 'ls', 1, '2027-01-05', '2027-01-25')]),
- ('MEC-PUMP', 'ONPLOT', 'Pompa injeksi, transfer & shipping', 'pump|p-2001|p-0501', 14, [
+ ('MEC-V0103', 'ONPLOT', 'Vessel V-0103 & filter skid', 'v-0103|flad-2000|sc-t2001|ro-2001', 6, [
+   ('Setting vessel V-0103', 'unit', 1, '2026-11-20', '2026-12-10'),
+   ('Setting filter skid', 'unit', 2, '2026-12-01', '2026-12-28'),
+   ('Nozzle & instrument hook-up vessel', 'set', 12, '2026-12-20', '2027-01-25')]),
+ ('MEC-PUMP', 'ONPLOT', 'Pompa injeksi, transfer & shipping', 'pump|p-2001|p-0501|/2001|*mechanical', 14, [
    ('Setting pompa injeksi P-2001A/B/C', 'unit', 3, '2026-11-10', '2026-12-05'),
    ('Setting transfer pump', 'unit', 2, '2026-11-12', '2026-12-05'),
    ('Setting shipping pump', 'unit', 2, '2026-11-15', '2026-12-10'),
@@ -97,14 +107,14 @@ P = [
    ('Fabrikasi spool PF/PW', 'dia-inch', 2200, '2026-10-25', '2026-12-10'),
    ('Welding joint PF/PW', 'dia-inch', 2200, '2026-11-05', '2026-12-28'),
    ('Erection pipa PF/PW', 'm', 1120, '2026-11-15', '2027-01-10')]),
- ('PIP-UT', 'ONPLOT', 'Piping utility (NG, SO, drain)', 'srni-', 0, [
+ ('PIP-UT', 'ONPLOT', 'Piping utility (NG, SO, drain)', 'srni-|*piping', 0, [
    ('Fabrikasi spool utility', 'dia-inch', 820, '2026-11-01', '2026-12-15'),
    ('Erection pipa utility', 'm', 640, '2026-11-20', '2027-01-15')]),
  ('TIE', 'ONPLOT', 'Tie-in & modifikasi line existing', '-pw-b-|-so-c-|-so-b-|-ng-b|-pf-b-|-co-b|-ww-b', 0, [
    ('Persiapan tie-in & hot tap', 'pts', 6, '2026-11-15', '2026-12-20'),
    ('Modifikasi line existing', 'm', 380, '2026-12-01', '2027-01-15'),
    ('Shutdown tie-in', 'ls', 1, '2027-01-15', '2027-01-25')]),
- ('PS', 'ONPLOT', 'Pipe support onplot', 'pipe-support', 0, [
+ ('PS', 'ONPLOT', 'Pipe support onplot', 'pipe-support|/ps-', 0, [
    ('Pondasi pipe support', 'titik', 140, '2026-10-05', '2026-11-10'),
    ('Fabrikasi pipe support', 'kg', 18500, '2026-10-15', '2026-11-30'),
    ('Pemasangan pipe support', 'set', 320, '2026-10-30', '2026-12-28')]),
@@ -117,7 +127,7 @@ P = [
  ('SAFE', 'ONPLOT', 'Safety equipment', 'safety', 0, [
    ('Safety shower & eye wash', 'unit', 2, '2026-12-15', '2027-01-15'),
    ('APAR & fire box', 'unit', 12, '2027-01-05', '2027-01-25')]),
- ('PRECOM', 'ONPLOT', 'Pre-commissioning', '', 0, [
+ ('PRECOM', 'ONPLOT', 'Pre-commissioning', '', 10, [
    ('Hydrotest system piping', 'test pack', 24, '2026-12-28', '2027-02-05'),
    ('Flushing & drying', 'system', 6, '2027-01-25', '2027-02-15'),
    ('Punch list & mechanical completion', 'ls', 1, '2027-02-05', '2027-02-26')]),
@@ -127,12 +137,15 @@ def smooth(x):
     x = max(0.0, min(1.0, x))
     return x * x * (3 - 2 * x)
 
-days = [D0 + dt.timedelta(i) for i in range((TODAY - D0).days + 1)]
+days = [D0 + dt.timedelta(i) for i in range((END_CAP - D0).days + 1)]
 # rainy days (Nov is the wet season) slow the work
 rain = {x for x in days if random.random() < (0.12 if x.month < 11 else 0.32)}
 
 rows, cur = [], {}
+last_day = None
 for di, day in enumerate(days):
+    if cur and all(v >= 100 for v in cur.values()): break
+    last_day = day
     sun = day.weekday() == 6
     active = 0
     for pid, area, name, hint, delay, acts in P:
@@ -160,21 +173,23 @@ for di, day in enumerate(days):
     concerns = []
     if day in rain: concerns.append('Hujan di lokasi, pekerjaan galian & pengecoran terhenti sebagian')
     if d('2026-10-20') <= day <= d('2026-11-14'): concerns.append('Pembebasan lahan ROW pipeline Seruni-Sintong KM 2+300 belum selesai')
-    if day >= d('2026-11-01'): concerns.append('Pompa injeksi P-2001A/B/C belum tiba di site (ETA vendor mundur 2 minggu)')
-    if d('2026-11-16') <= day: concerns.append('Repair rate radiografi pipeline 6,8% (target < 5%)')
+    if d('2026-11-01') <= day <= d('2026-11-28'): concerns.append('Pompa injeksi P-2001A/B/C belum tiba di site (ETA vendor mundur 2 minggu)')
+    if d('2026-11-29') <= day <= d('2026-12-03'): concerns.append('Pompa P-2001A/B/C tiba di site, inspeksi kedatangan (MRIR) OK')
+    if d('2026-11-16') <= day <= d('2026-12-20'): concerns.append('Repair rate radiografi pipeline 6,8% (target < 5%), welder di-requalify')
+    if d('2027-01-14') <= day <= d('2027-01-27'): concerns.append('Persiapan shutdown tie-in: koordinasi jadwal dengan Operation')
+    if d('2027-02-20') <= day: concerns.append('Punch list kategori A diselesaikan sebelum mechanical completion')
     day_rows = rows[-sum(len(p[5]) for p in P):]
     for i, c in enumerate(concerns): day_rows[i].append(c)
 
 hdr = ['date', 'area', 'package', 'package_id', 'hint', 'activity', 'unit', 'bq', 'progress', 'manpower', 'concern']
-with open('/home/claude/seruni/Seruni_WF_daily_report_SIMULASI.csv', 'w', newline='') as f:
+with open(__import__('os').path.join(__import__('os').path.dirname(__import__('os').path.abspath(__file__)), 'Seruni_WF_daily_report_SIMULASI.csv'), 'w', newline='') as f:
     w = csv.writer(f); w.writerow(hdr)
     for r in rows: w.writerow(r + [''] * (len(hdr) - len(r)))
-with open('/home/claude/seruni/Seruni_WF_baseline_SIMULASI.csv', 'w', newline='') as f:
+with open(__import__('os').path.join(__import__('os').path.dirname(__import__('os').path.abspath(__file__)), 'Seruni_WF_baseline_SIMULASI.csv'), 'w', newline='') as f:
     w = csv.writer(f); w.writerow(['package', 'start', 'finish'])
     for pid, area, name, hint, delay, acts in P:
         w.writerow([name, min(a[3] for a in acts), max(a[4] for a in acts)])
 print(len(rows), 'rows', len(days), 'days')
 # overall at today
 tot = sum(len(p[5]) for p in P)
-print('overall today %.1f' % (sum(cur.values()) / tot))
-for pid, *_ , acts in P: print(pid, round(sum(cur[(pid, a[0])] for a in acts) / len(acts), 1))
+print('last report', last_day, 'overall %.1f' % (sum(cur.values()) / tot))
