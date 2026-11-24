@@ -36,6 +36,19 @@ test('weekly report html is self-contained and escapes text', () => {
   assert.ok(html.startsWith('<!DOCTYPE html>'));
   assert.ok(html.includes('P &amp; Q'));
   assert.ok(html.includes('&lt;script&gt;'));
-  assert.ok(html.includes('DATA SIMULASI'));
+  assert.ok(html.includes('Data simulasi'));
   assert.ok(!/src="http/.test(html));
+});
+test('monthly facts: period starts on the 1st, calendar covers each day, weeks add up', async () => {
+  const { periodFacts, reportHtml } = await import('../src/engine/report4d.js');
+  const m = buildModel(reports(21));
+  const f = periodFacts(m, 20, 'month');
+  assert.equal(f.from, '2026-11-01');
+  assert.equal(f.cal.length, 21);
+  const sum = f.weeks.reduce((s, w) => s + w.gain, 0);
+  assert.ok(Math.abs(sum - f.wk) < 0.01);
+  const html = reportHtml(m, 20, { kind: 'month', lang: 'id' });
+  assert.ok(html.includes('Laporan progres bulanan') && html.includes('November 2026'));
+  assert.ok(!html.includes('—'));                      // no em dash in copy
+  assert.ok(!/text-transform:\s*uppercase/.test(html));
 });
