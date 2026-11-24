@@ -36,8 +36,8 @@ Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (
 - **Weights:** per-package weight for the overall % (default = number of activities).
 - **Video with panels:** *Play & record* burns the title (project, date, progress vs plan), active operations and build sequence into the video.
 - **Demo data:** *Load demo: Seruni WF (simulated)* loads simulated daily reports + baseline and auto-maps them (data/seruni, not a contractor report).
-- **Weekly report:** *Weekly report* builds a printable A4 report for the week ending at the slider date — KPIs (actual, plan, deviation, SPI, manpower), forecast finish, S-curve with manpower, 3D pictures of what is built, package table, work progressed this week with quantities, 2-week look-ahead and issues. Print → Save as PDF.
-- Package rows show the planned % (amber tick) and deviation; the S-curve shows manpower bars. The 4D panel, overlays and report follow the ID/EN switch.
+- **Weekly and monthly reports:** choose *Weekly* or *Monthly* and the panel builds a printable A4 report for the week ending at the slider date — KPIs (actual, plan, deviation, SPI, manpower), forecast finish, S-curve with manpower, 3D pictures of what is built, package table, work progressed this week with quantities, 2-week look-ahead and issues. Print → Save as PDF.
+- Package rows show the planned % (amber tick), deviation and a sparkline; open a package for its own S-curve. The panel has a stats band (actual, planned, deviation with SPI, manpower), an S-curve with a crosshair readout (tap or drag to jump), issue marks above the timeline and a daily progress calendar (tap a day to jump). The monthly report adds the calendar and a week-by-week table. *CSV templates* downloads blank daily-report and baseline files. The 4D panel, overlays and reports follow the ID/EN switch.
 - Offplot/Onplot groups collapse; packages or whole groups can be removed from 4D and restored.
 
 ## Jalankan lokal

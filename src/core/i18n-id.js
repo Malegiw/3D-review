@@ -680,12 +680,40 @@ const E = {
   'Select objects in the 3D view first (tap an object; Select resolution: Item or Component).': 'Pilih objek di tampilan 3D dulu (ketuk objek; resolusi pilih: Item atau Komponen).',
   'on plan': 'sesuai rencana',
   'Recording': 'Merekam',
+  'Deviation': 'Deviasi',
+  'Manpower': 'Tenaga kerja',
+  'people on site': 'orang di lokasi',
+  'Daily progress calendar': 'Kalender progres harian',
+  'Small gain': 'Naik sedikit',
+  'Large gain': 'Naik banyak',
+  'Issue logged': 'Ada isu',
+  'Issue': 'Isu',
+  'Report period': 'Periode laporan',
+  'Weekly': 'Mingguan',
+  'Monthly': 'Bulanan',
+  'Speed (days per second)': 'Kecepatan (hari per detik)',
+  'Download CSV templates': 'Unduh template CSV',
+  'CSV templates': 'Template CSV',
+  'Monthly report': 'Laporan bulanan',
+  'Everything stays on this device. CSV columns: date, package, activity, unit, bq, progress (cumulative %), with optional area, package_id, hint, manpower and concern.': 'Semua data tetap di perangkat ini. Kolom CSV: date, package, activity, unit, bq, progress (% kumulatif), dan opsional area, package_id, hint, manpower, concern.',
+  'Monthly report opened. Use Print to save it as PDF.': 'Laporan bulanan dibuka. Pakai Cetak untuk menyimpannya sebagai PDF.',
+  'Weekly report opened. Use Print to save it as PDF.': 'Laporan mingguan dibuka. Pakai Cetak untuk menyimpannya sebagai PDF.',
+  'Two templates downloaded: daily report (one row per activity per day; progress is cumulative %) and baseline (package, start, finish). The hint column lists object or layer names for Auto-map, separated by |.': 'Dua template diunduh: laporan harian (satu baris per aktivitas per hari; progress = % kumulatif) dan baseline (package, start, finish). Kolom hint berisi nama objek atau layer untuk Auto-map, dipisah dengan |.',
+  'SPI ·': 'SPI ·',
 };
 
 export const EXACT = new Map(Object.entries(E));
 
 /** Patterns for sentences built from data. First match wins. */
 export const RULES = [
+  [/^Progress (.+) · day (\d+)\/(\d+)$/, 'Progres $1 · hari $2/$3'],
+  [/^\+(.+)% in 7 days$/, '+$1% dalam 7 hari'],
+  [/^(\d+) pkgs with baseline$/, '$1 paket ber-baseline'],
+  [/^max \+(.+)%\/day$/, 'maks +$1%/hari'],
+  [/^Weekly report · week (\d+)$/, 'Laporan mingguan · minggu ke-$1'],
+  [/^Monthly report · (.+)$/, 'Laporan bulanan · $1'],
+  [/^(.+) · no report$/, '$1 · tanpa laporan'],
+  [/^Summary rows \((\d+)\), shown in the report but not counted in the overall %$/, 'Baris ringkasan ($1), tampil di laporan tapi tidak dihitung di progres keseluruhan'],
   // 4D progress
   [/^(.+) → (.+) · (\d+) report days · (\d+) activities$/, '$1 → $2 · $3 hari laporan · $4 aktivitas'],
   [/^(\d+) people on site · day (\d+)\/(\d+)$/, '$1 orang di lokasi · hari $2/$3'],

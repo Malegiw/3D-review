@@ -12,7 +12,7 @@ import { displayName } from '../engine/groups.js';
 import { baselineFromCSV } from '../engine/progress4d.js';
 import { createSequence } from '../engine/sequence4d.js';
 import { autoMap, routeOrder } from '../engine/automap.js';
-import { weeklyReportHtml } from '../engine/report4d.js';
+import { reportHtml } from '../engine/report4d.js';
 import { currentLang, t as tr } from '../core/i18n.js';
 
 const OPT_KEY = 'r3d-4d';
@@ -246,10 +246,10 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     }).sort((x, y) => x.a - y.a || (x.z ?? 99) - (y.z ?? 99));
     return model._spans;
   }
-  function removeFloat() { floatEl?.remove(); floatEl = null; floatDay = -1; }
+  function removeFloat() { floatEl?.remove(); floatEl = null; floatDay = -1; viewer.host.classList.remove('p4-on'); }
   function updateFloat() {
     if (!model || !hasPanel() || !opts.hud) return removeFloat();
-    if (!floatEl) { floatEl = h('div', { class: 'p4-float' }); viewer.host.append(floatEl); floatDay = -1; }
+    if (!floatEl) { floatEl = h('div', { class: 'p4-float' }); viewer.host.append(floatEl); floatDay = -1; viewer.host.classList.add('p4-on'); }
     const n = N(), di = Math.round(t);
     const key = `${di}|${Math.floor(t * 4)}`;
     if (floatDay === key) return;
@@ -307,9 +307,9 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const sub = ID
       ? `Progres ${pct1(ov)}${plan != null ? `  ·  rencana ${pct1(plan)}  ·  ${dv >= 0 ? 'lebih cepat' : 'terlambat'} ${Math.abs(dv).toFixed(1)}%` : ''}  ·  hari ${di + 1}/${n}`
       : `Progress ${pct1(ov)}${plan != null ? `  ·  plan ${pct1(plan)}  ·  ${dv >= 0 ? 'ahead' : 'behind'} ${Math.abs(dv).toFixed(1)}%` : ''}  ·  day ${di + 1}/${n}`;
-    ctx.font = F(600, 18); const tw = Math.max(ctx.measureText(title).width, (ctx.font = F(400, 13), ctx.measureText(sub).width)) + pad * 2;
+    ctx.font = F(500, 18); const tw = Math.max(ctx.measureText(title).width, (ctx.font = F(400, 13), ctx.measureText(sub).width)) + pad * 2;
     box(pad, pad, tw, 58 * s);
-    ctx.fillStyle = '#fff'; ctx.font = F(600, 18); ctx.fillText(title, pad * 2, pad + 26 * s);
+    ctx.fillStyle = '#fff'; ctx.font = F(500, 18); ctx.fillText(title, pad * 2, pad + 26 * s);
     ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = F(400, 13); ctx.fillText(sub, pad * 2, pad + 47 * s);
     // overall bar
     ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(pad, pad + 62 * s, tw, 5 * s);
@@ -320,7 +320,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     ops.sort((x, y) => y.d - x.d);
     const lead = ops[0], ow = 330 * s, oh = (40 + Math.min(7, ops.length) * 21) * s, ox = W - ow - pad;
     box(ox, pad, ow, oh);
-    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText(`${tr('Current stage').toUpperCase()} · ${clip(lead ? lead.p.name : tr('Mobilisation'), ow - 140 * s).toUpperCase()}`, ox + pad, pad + 22 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(500, 11); ctx.fillText(`${tr('Current stage')} · ${clip(lead ? lead.p.name : tr('Mobilisation'), ow - 140 * s)}`, ox + pad, pad + 22 * s);
     ops.slice(0, 7).forEach(({ a, d }, i) => {
       const y = pad + (44 + i * 21) * s;
       ctx.font = F(400, 13); ctx.fillStyle = '#fff'; ctx.fillText(clip(a.desc, ow - 90 * s), ox + pad, y);
@@ -331,7 +331,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     if (!sp.length) return;
     const gw = Math.min(W * 0.55, 620 * s), gh = (34 + sp.length * 16) * s, gx = pad, gy = H - gh - pad, nw = 170 * s, bx = gx + pad + nw, bw = gw - pad * 2 - nw;
     box(gx, gy, gw, gh);
-    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(600, 11); ctx.fillText(tr('Build sequence').toUpperCase(), gx + pad, gy + 20 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = F(500, 11); ctx.fillText(tr('Build sequence'), gx + pad, gy + 20 * s);
     sp.forEach(({ p, a, z }, i) => {
       const y = gy + (30 + i * 16) * s, end = z ?? n - 1;
       ctx.fillStyle = di >= a ? '#fff' : 'rgba(255,255,255,0.5)'; ctx.font = F(400, 11); ctx.fillText(clip(p.name, nw - 8 * s), gx + pad, y + 9 * s);
@@ -405,7 +405,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     toast(`${n} report day${n > 1 ? 's' : ''} added${skipped ? `, ${skipped} skipped` : ''}. ${model.pkgs.length} work packages, ${model.count} activities.`, 'ok', '4D data');
     refresh();
   }
-  async function weeklyReport() {
+  async function makeReport(kind = opts.repKind || 'week') {
     if (!model) return;
     stop();
     const di = Math.round(t);
@@ -430,16 +430,33 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       if (s1) images.push({ src: s1, caption: `${two ? (currentLang() === 'id' ? 'Area utama · ' : 'Main area · ') : ''}${cap}` });
       if (two) { const s2 = viewer.coverShot(1600, 1.45, all.clone().expandByScalar(10)); if (s2) images.push({ src: s2, caption: `${currentLang() === 'id' ? 'Keseluruhan' : 'Whole site'} · ${cap}` }); }
     } catch (e) { console.warn(e); }
-    const html = weeklyReportHtml(model, di, {
-      project: project.name || project.code || '', lang: currentLang(), simulated: !!rec.demo, images, dateFmt: (d) => fmt.date(d),
+    const html = reportHtml(model, di, {
+      kind, project: project.name || project.code || '', lang: currentLang(), simulated: !!rec.demo, images, dateFmt: (d) => fmt.date(d),
     });
-    const name = `Laporan-mingguan_${(project.code || project.name || 'proyek').replace(/[^\w-]+/g, '_')}_${model.dates[di]}.html`;
+    const name = `Laporan-${kind === 'month' ? 'bulanan' : 'mingguan'}_${(project.code || project.name || 'proyek').replace(/[^\w-]+/g, '_')}_${model.dates[di]}.html`;
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const w = window.open(url, '_blank');
     if (!w) download(blob, name); // pop-up blocked: hand over the file instead
     setTimeout(() => URL.revokeObjectURL(url), 120000);
-    toast('Weekly report opened — use Print → Save as PDF.', 'ok', 'Weekly report');
+    toast(kind === 'month' ? 'Monthly report opened. Use Print to save it as PDF.' : 'Weekly report opened. Use Print to save it as PDF.', 'ok', kind === 'month' ? 'Monthly report' : 'Weekly report');
+  }
+  function downloadTemplate() {
+    const rows = [
+      'date,area,package,package_id,hint,activity,unit,bq,progress,manpower,concern',
+      '2026-09-01,ONPLOT,Pondasi tank & equipment,CIV-FDN,pondasi|pedestal,Galian pondasi,m3,380,0,22,',
+      '2026-09-01,ONPLOT,Pondasi tank & equipment,CIV-FDN,pondasi|pedestal,Pengecoran K-300,m3,410,0,22,',
+      '2026-09-01,ONPLOT,Tank T-0103,MEC-T0103,t-0103,Erection shell course 1-3,course,3,0,22,',
+      '2026-09-01,OFFPLOT,Pipeline A - B,OFF-PL,pipeline,Welding joint,joint,420,0,22,Hujan siang hari',
+      '2026-09-02,ONPLOT,Pondasi tank & equipment,CIV-FDN,pondasi|pedestal,Galian pondasi,m3,380,6.5,31,',
+      '2026-09-02,ONPLOT,Pondasi tank & equipment,CIV-FDN,pondasi|pedestal,Pengecoran K-300,m3,410,0,31,',
+      '2026-09-02,ONPLOT,Tank T-0103,MEC-T0103,t-0103,Erection shell course 1-3,course,3,0,31,',
+      '2026-09-02,OFFPLOT,Pipeline A - B,OFF-PL,pipeline,Welding joint,joint,420,1.2,31,',
+    ].join('\n');
+    const base = ['package,start,finish', 'Pondasi tank & equipment,2026-09-01,2026-10-15', 'Tank T-0103,2026-10-01,2027-01-15', 'Pipeline A - B,2026-09-15,2026-12-20'].join('\n');
+    download(new Blob([`\ufeff${rows}\n`], { type: 'text/csv' }), 'Template_laporan_harian_4D.csv');
+    setTimeout(() => download(new Blob([`\ufeff${base}\n`], { type: 'text/csv' }), 'Template_baseline_4D.csv'), 400);
+    toast('Two templates downloaded: daily report (one row per activity per day; progress is cumulative %) and baseline (package, start, finish). The hint column lists object or layer names for Auto-map, separated by |.', 'ok', 'CSV templates');
   }
   async function loadDemo() {
     const base = (p) => new URL(`samples/seruni/${p}`, document.baseURI).href;
@@ -610,28 +627,112 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   }
 
   // ---------- panel ----------
-  function sCurve() {
-    const W = 350, H = 84, P = 4, n = N();
+  // S-curve with a crosshair readout; tap or drag to jump the timeline there (line chart pattern)
+  function curveChart({ actual, plan = null, mp = null, W = 350, H = 96, label = 'Overall progress', jump = true }) {
+    const P = 4, n = N();
     const xs = (i) => P + ((W - 2 * P) * i) / Math.max(1, n - 1), ys = (v) => H - P - ((H - 2 * P) * v) / 100;
-    const pts = Array.from(model.overall, (v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`);
-    const cur = h('line', { svg: true, y1: P, y2: H - P, stroke: 'var(--fg-2)', 'stroke-width': 1 });
-    const dot = h('circle', { svg: true, r: 4, fill: 'var(--cyan)', stroke: 'var(--surface, var(--bg-2))', 'stroke-width': 2 });
+    const pts = Array.from(actual, (v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`);
+    const cur = h('line', { svg: true, y1: P, y2: H - P, class: 'p4-cur' });
+    const dot = h('circle', { svg: true, r: 4, class: 'p4-dotc' });
+    const hx = h('line', { svg: true, y1: P, y2: H - P, class: 'p4-hx' });
+    const tip = h('div', { class: 'ch-tip p4-tip', hidden: true });
     const move = () => {
-      const x = xs(t), y = ys(pctAt(model.overall, t));
+      const x = xs(t), y = ys(pctAt(actual, t));
       cur.setAttribute('x1', x); cur.setAttribute('x2', x); dot.setAttribute('cx', x); dot.setAttribute('cy', y);
     };
-    live.push(move);
-    move();
-    const mpv = model.manpower, mpMax = Math.max(0, ...mpv.filter((v) => v != null));
+    live.push(move); move();
+    const mpMax = mp ? Math.max(0, ...mp.filter((v) => v != null)) : 0;
     const bw = Math.max(0.6, (W - 2 * P) / n - 0.4);
-    const mpBars = mpMax ? mpv.map((v, i) => (v == null ? null : h('rect', { svg: true, x: (xs(i) - bw / 2).toFixed(1), y: (H - P - (H - 2 * P) * 0.32 * v / mpMax).toFixed(1), width: bw.toFixed(1), height: ((H - 2 * P) * 0.32 * v / mpMax).toFixed(1), fill: 'var(--fg-3, #8b95a7)', opacity: 0.28 }))) : [];
-    return h('svg', { svg: true, class: 'p4-curve', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Overall progress ${pct1(model.overall[0])} to ${pct1(model.overall[n - 1])}` },
-      mpBars,
-      [0, 50, 100].map((g) => h('line', { svg: true, x1: P, x2: W - P, y1: ys(g), y2: ys(g), stroke: 'var(--line)', 'stroke-width': 1 })),
-      h('polygon', { svg: true, points: `${xs(0)},${ys(0)} ${pts.join(' ')} ${xs(n - 1)},${ys(0)}`, fill: 'var(--cyan)', opacity: 0.1 }),
-      h('polyline', { svg: true, points: pts.join(' '), fill: 'none', stroke: 'var(--cyan)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }),
-      model.plan ? h('polyline', { svg: true, points: Array.from(model.plan, (v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' '), fill: 'none', stroke: 'var(--amber, #f5b82e)', 'stroke-width': 1.6, 'stroke-dasharray': '4 3' }) : null,
-      cur, dot);
+    const bars = mpMax ? mp.map((v, i) => (v == null ? null : h('rect', { svg: true, x: (xs(i) - bw / 2).toFixed(1), y: (H - P - (H - 2 * P) * 0.32 * v / mpMax).toFixed(1), width: bw.toFixed(1), height: ((H - 2 * P) * 0.32 * v / mpMax).toFixed(1), class: 'p4-mp' }))) : [];
+    const svg = h('svg', { svg: true, class: 'p4-curve', viewBox: `0 0 ${W} ${H}`, 'aria-hidden': 'true' },
+      bars,
+      [0, 50, 100].map((g) => h('line', { svg: true, x1: P, x2: W - P, y1: ys(g), y2: ys(g), class: 'p4-grid' })),
+      h('polygon', { svg: true, points: `${xs(0)},${ys(0)} ${pts.join(' ')} ${xs(n - 1)},${ys(0)}`, class: 'p4-area' }),
+      h('polyline', { svg: true, points: pts.join(' '), class: 'p4-act' }),
+      plan ? h('polyline', { svg: true, points: Array.from(plan, (v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' '), class: 'p4-planl' }) : null,
+      hx, cur, dot);
+    const wrap = h('div', { class: 'p4-chart', tabindex: 0, role: 'slider', 'aria-label': label, 'aria-valuemin': 1, 'aria-valuemax': n }, svg, tip);
+    const idxAt = (e) => { const r = svg.getBoundingClientRect(); return Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width * W - P) / (W - 2 * P) * (n - 1)))); };
+    const show = (i) => {
+      const x = xs(i);
+      hx.setAttribute('x1', x); hx.setAttribute('x2', x); hx.style.opacity = 1;
+      tip.hidden = false;
+      tip.replaceChildren(
+        h('div', { class: 'ch-tip-h' }, fmt.date(model.dates[i])),
+        h('div', { class: 'ch-tip-r' }, h('i', { class: 'k act' }), h('b', {}, pct1(actual[i])), h('span', {}, 'Actual')),
+        plan ? h('div', { class: 'ch-tip-r' }, h('i', { class: 'k plan' }), h('b', {}, pct1(plan[i])), h('span', {}, 'Planned')) : null,
+        mp && mp[i] != null ? h('div', { class: 'ch-tip-r' }, h('i', { class: 'k mp' }), h('b', {}, String(mp[i])), h('span', {}, 'people on site')) : null);
+      const left = (x / W) * wrap.clientWidth;
+      tip.style.left = `${Math.max(0, Math.min(wrap.clientWidth - tip.offsetWidth, left + (left > wrap.clientWidth / 2 ? -tip.offsetWidth - 10 : 10)))}px`;
+    };
+    const hide = () => { tip.hidden = true; hx.style.opacity = 0; };
+    let drag = false;
+    wrap.addEventListener('pointermove', (e) => { const i = idxAt(e); show(i); if (drag && jump) { stop(); setT(i); } });
+    wrap.addEventListener('pointerleave', () => { if (!drag) hide(); });
+    wrap.addEventListener('pointerdown', (e) => { if (!jump) return; drag = true; wrap.setPointerCapture(e.pointerId); stop(); setT(idxAt(e)); });
+    wrap.addEventListener('pointerup', () => { drag = false; });
+    wrap.addEventListener('keydown', (e) => {
+      if (!jump || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+      e.preventDefault(); stop();
+      const i = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : Math.max(0, Math.min(n - 1, Math.round(t) + (e.key === 'ArrowRight' ? 1 : -1)));
+      setT(i); show(i);
+    });
+    wrap.addEventListener('blur', hide);
+    return wrap;
+  }
+  function sCurve() { return curveChart({ actual: model.overall, plan: model.plan, mp: model.manpower, H: 96 }); }
+  // tiny trend for a package row (sparkline): actual up to today, plan dashed
+  function spark(p) {
+    const W = 64, H = 18, n = N();
+    const xs = (i) => 1 + ((W - 2) * i) / Math.max(1, n - 1), ys = (v) => H - 1 - ((H - 2) * v) / 100;
+    const act = h('polyline', { svg: true, class: 'p4-sp-a' });
+    const upd = () => { const k = Math.min(n - 1, Math.round(t)); act.setAttribute('points', Array.from(p.curve.slice(0, k + 1), (v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' ')); };
+    live.push(upd); upd();
+    return h('svg', { svg: true, class: 'p4-spark', viewBox: `0 0 ${W} ${H}`, 'aria-hidden': 'true' },
+      p.plan ? h('polyline', { svg: true, class: 'p4-sp-p', points: Array.from(p.plan, (v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' ') }) : null, act);
+  }
+  // daily progress calendar (heat calendar): one cell per day, weeks as columns; tap a day to jump there
+  function heatCalendar() {
+    const D = model.dates, n = D.length, day = 864e5;
+    const t0 = Date.parse(`${D[0]}T00:00:00Z`), t1 = Date.parse(`${D[n - 1]}T00:00:00Z`);
+    const dow0 = (new Date(t0).getUTCDay() + 6) % 7;
+    const gains = D.map((d, i) => model.overall[i] - (i ? model.overall[i - 1] : 0));
+    const max = Math.max(0.1, ...gains);
+    const idx = new Map(D.map((d, i) => [d, i]));
+    const cells = [];
+    const weeks = Math.ceil((dow0 + (t1 - t0) / day + 1) / 7);
+    const grid = h('div', { class: 'p4-hc-grid', style: { gridTemplateColumns: `repeat(${weeks}, 1fr)` } });
+    for (let w = 0; w < weeks; w++) for (let r = 0; r < 7; r++) {
+      const k = w * 7 + r - dow0, tt = t0 + k * day, d = new Date(tt).toISOString().slice(0, 10), i = idx.get(d);
+      if (k < 0 || tt > t1) { grid.append(h('i', { class: 'p4-hc pad', style: { gridColumn: w + 1, gridRow: r + 1 } })); continue; }
+      const g = i == null ? null : gains[i];
+      const c = h('button', {
+        class: `p4-hc${(model.concerns[d] || []).length ? ' issue' : ''}`, style: { gridColumn: w + 1, gridRow: r + 1, '--a': g == null ? 0 : (0.14 + 0.86 * Math.min(1, g / max)).toFixed(2) },
+        'aria-label': `${fmt.date(d)} · ${g == null ? 'no report' : `+${g.toFixed(1)}%`}`, 'data-tip': `${fmt.date(d)} · ${g == null ? 'no report' : `+${g.toFixed(1)}%`}`,
+        onclick: () => { if (i != null) { stop(); setT(i); } },
+      });
+      if (i != null) cells[i] = c;
+      grid.append(c);
+    }
+    let on = null;
+    live.push(() => { const c = cells[Math.round(t)]; if (c === on) return; on?.classList.remove('on'); c?.classList.add('on'); on = c; });
+    return h('details', { class: 'p4-hcal', open: !!opts.calOpen, ontoggle: (e) => { opts.calOpen = e.target.open; saveOpts(); } },
+      h('summary', { class: 'p4-gh' }, h('span', { class: 'p4-gn' }, 'Daily progress calendar'), h('span', { class: 'dim2' }, `max +${max.toFixed(1)}%/day`)),
+      grid,
+      h('div', { class: 'p4-legend' }, h('span', {}, h('i', { class: 'p4-hc-k', style: { '--a': 0.2 } }), 'Small gain'), h('span', {}, h('i', { class: 'p4-hc-k', style: { '--a': 1 } }), 'Large gain'), h('span', {}, h('i', { class: 'p4-hc-k issue' }), 'Issue logged')));
+  }
+  // markers above the timeline: days with contractor concerns
+  function issueMarks() {
+    const n = N(), D = model.dates;
+    const box = h('div', { class: 'p4-marks', 'aria-hidden': 'true' });
+    const seen = new Set();
+    D.forEach((d, i) => {
+      const fresh = (model.concerns[d] || []).filter((x) => !seen.has(x)); // mark the day an issue is first reported
+      fresh.forEach((x) => seen.add(x));
+      if (!fresh.length) return;
+      box.append(h('i', { class: 'p4-mark', style: { left: `${(i / Math.max(1, n - 1)) * 100}%` }, 'data-tip': `${fmt.date(d)}: ${fresh[0]}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}` }));
+    });
+    return box;
   }
   function pkgRow(p) {
     const n = targets(p.id).length;
@@ -651,7 +752,9 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     };
     live.push(upd); upd();
     const acts = h('div', { class: 'p4-acts' });
+    const chartHost = h('div', { class: 'p4-pchart' });
     const fill = () => {
+      if (!chartHost.firstChild) chartHost.append(curveChart({ actual: p.curve, plan: p.plan, H: 70, label: `${p.name} progress` }));
       acts.replaceChildren(...activitiesAt(p, Math.round(t)).map((a) => h('div', { class: 'p4-act' },
         h('span', { class: 'p4-an' }, a.desc),
         h('span', { class: 'mono dim2' }, `${fmt.num(a.bq, a.bq % 1 ? 1 : 0)} ${a.unit}`),
@@ -660,7 +763,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const btn = (ic, tip, fn) => h('button', { class: 'btn sm icon ghost', 'data-tip': tip, 'aria-label': tip, onclick: (e) => { e.preventDefault(); e.stopPropagation(); fn(); } }, icon(ic));
     return h('details', { class: `p4-pkg ${n ? 'mapped' : ''}`, ontoggle: (e) => { if (e.target.open) fill(); } },
       h('summary', {},
-        h('div', { class: 'p4-top' }, dot, h('span', { class: 'p4-name' }, p.name), val),
+        h('div', { class: 'p4-top' }, dot, h('span', { class: 'p4-name' }, p.name), spark(p), val),
         h('div', { class: 'progress p4-bar' }, bar, mark),
         devL,
         h('div', { class: 'p4-sub' },
@@ -674,6 +777,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       h('label', { class: 'p4-w' }, h('span', { class: 'dim2' }, 'Weight'),
         h('input', { type: 'number', min: 0, step: 'any', placeholder: String(p.acts.length), value: rec.weights?.[p.id] ?? '', 'aria-label': `Weight of ${p.name}`, onchange: (e) => setWeight(p, +e.target.value) }),
         h('span', { class: 'dim2' }, rec.weights?.[p.id] ? 'custom' : 'default = activity count')),
+      chartHost,
       acts);
   }
   function render() {
@@ -685,44 +789,71 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
           h('p', {}, 'Import the contractor’s Daily Activity Report PDFs (one per day). Progress per work package is read from the BQ table, then coloured on the 3D model and played day by day.')),
         h('button', { class: 'btn primary', style: { width: '100%' }, onclick: importFiles }, icon('upload'), 'Import daily report PDF / CSV'),
         h('button', { class: 'btn', style: { width: '100%' }, onclick: loadDemo }, icon('film'), 'Load demo: Seruni WF (simulated)'),
-        h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'Everything stays on this device. CSV format: date, package, activity, unit, bq, progress (long format; the XLSX export has a Long sheet you can re-import as CSV).'));
+        h('button', { class: 'btn ghost', style: { width: '100%' }, onclick: downloadTemplate }, icon('download'), 'Download CSV templates'),
+        h('p', { class: 'dim2', style: { margin: 0, fontSize: '12px' } }, 'Everything stays on this device. CSV columns: date, package, activity, unit, bq, progress (cumulative %), with optional area, package_id, hint, manpower and concern.'));
       return;
     }
     const n = N(), di = () => Math.round(t);
-    const kpi = h('b', { class: 'p4-kpi mono' }), dl = h('span', { class: 'mono' }), mp = h('span', { class: 'mono dim2' });
+    // headline numbers (stats band): values update with the timeline, digits are tabular so nothing shifts
+    const sv = {}, sn = {};
+    const stat = (key, label, tone = '') => h('div', { class: `stat ${tone}`, 'data-k': key }, h('span', { class: 'stat-l' }, label), (sv[key] = h('b', { class: 'stat-v' }, '·')), (sn[key] = h('small', { class: 'stat-n' })));
+    const stats = h('div', { class: 'stats p4-stats' },
+      stat('act', 'Actual'), model.plan ? stat('plan', 'Planned') : null, model.plan ? stat('dev', 'Deviation') : null, stat('mp', 'Manpower'));
+    const dl = h('b', {}), dayL = h('span', { class: 'dim2 mono' });
     const slider = h('input', { type: 'range', class: 'p4-slider', min: 0, max: n - 1, step: 0.01, value: t, 'aria-label': 'Report day', oninput: (e) => { const v = +e.target.value; stop(); setT(v, { fromSlider: true }); } });
     const play$ = h('button', { class: 'btn primary icon', 'aria-label': 'Play', onclick: () => (playing ? stop() : play()) });
     const rec$ = h('button', { class: 'btn sm mag', onclick: playRecord }, h('span', { class: 'rec-dot' }), 'Play & record');
     const conc = h('div', { class: 'p4-conc' });
-    const planL = h('div', { class: 'p4-plan mono' });
+    const seg = (label, key, list, on) => h('div', { class: 'seg', role: 'group', 'aria-label': label }, list.map(([v, l]) => h('button', { class: opts[key] === v ? 'on' : '', 'aria-pressed': String(opts[key] === v), onclick: (e) => {
+      opts[key] = v; saveOpts();
+      for (const b of e.currentTarget.parentElement.querySelectorAll('button')) { const sel = b === e.currentTarget; b.classList.toggle('on', sel); b.setAttribute('aria-pressed', String(sel)); }
+      on?.();
+    } }, l)));
+    if (!opts.repKind) opts.repKind = 'week';
     const repLbl = h('span');
-    const repBtn = h('button', { class: 'btn primary', style: { width: '100%' }, onclick: weeklyReport }, icon('docs'), repLbl);
-    live.push(() => { const d = model.dates[di()]; repLbl.textContent = `Weekly report · week ${Math.floor((Date.parse(d) - Date.parse(model.dates[0])) / 6048e5) + 1} (${fmt.date(d)})`; });
+    const repBtn = h('button', { class: 'btn primary p4-rep', onclick: () => makeReport(opts.repKind) }, icon('docs'), repLbl);
+    const repLabel = () => {
+      const d = model.dates[di()];
+      repLbl.textContent = opts.repKind === 'month' ? `Monthly report · ${fmt.date(d).replace(/^\d+\s*/, '')}` : `Weekly report · week ${Math.floor((Date.parse(d) - Date.parse(model.dates[0])) / 6048e5) + 1}`;
+    };
+    live.push(repLabel);
     live.push((fromSlider) => {
-      kpi.textContent = pct1(pctAt(model.overall, t));
+      const a = pctAt(model.overall, t), i = di();
+      sv.act.textContent = pct1(a);
+      const prev = model.dates.findIndex((d) => d > new Date(Date.parse(model.dates[i]) - 7 * 864e5).toISOString().slice(0, 10));
+      sn.act.textContent = `+${(a - (prev > 0 ? model.overall[prev - 1] : 0)).toFixed(1)}% in 7 days`;
       if (model.plan) {
         const pl = pctAt(model.plan, t), ac = pctAt(model.plan.actual, t), d = ac - pl;
-        planL.textContent = `Plan ${pct1(pl)} · actual ${pct1(ac)} · ${Math.abs(d) < 0.05 ? 'on plan' : d > 0 ? `ahead ${d.toFixed(1)}%` : `behind ${(-d).toFixed(1)}%`} (${model.plan.covered} pkgs with baseline)`;
-        planL.style.color = d < -0.05 ? 'var(--red, #e5484d)' : 'var(--green, #2fbf71)';
-      } else planL.textContent = '';
-      dl.textContent = fmt.date(model.dates[di()]);
-      mp.textContent = model.manpower[di()] != null ? `${model.manpower[di()]} people on site · day ${di() + 1}/${n}` : `day ${di() + 1}/${n}`;
+        sv.plan.textContent = pct1(pl); sn.plan.textContent = `${model.plan.covered} pkgs with baseline`;
+        sv.dev.textContent = `${d > 0 ? '+' : ''}${d.toFixed(1)}%`;
+        sn.dev.textContent = pl > 0.5 ? `SPI ${(ac / pl).toFixed(2)}` : 'SPI ·';
+        sv.dev.parentElement.className = `stat ${d < -1 ? 'bad' : d > 1 ? 'good' : ''}`;
+      }
+      const m = model.manpower[i];
+      sv.mp.textContent = m != null ? String(m) : '·'; sn.mp.textContent = 'people on site';
+      dl.textContent = fmt.date(model.dates[i]);
+      dayL.textContent = `day ${i + 1}/${n}`;
       if (!fromSlider) slider.value = t;
       play$.replaceChildren(icon(playing ? 'x' : 'play')); play$.setAttribute('aria-label', playing ? 'Stop' : 'Play');
       rec$.disabled = recording;
-      const c = model.concerns[model.dates[di()]] || [];
+      const c = model.concerns[model.dates[i]] || [];
       conc.replaceChildren(...(c.length ? [h('b', { class: 'dim2' }, 'Contractor concerns'), ...c.map((x) => h('p', {}, x))] : []));
     });
     const chk = (label, key, on) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: opts[key], onchange: (e) => { opts[key] = e.target.checked; saveOpts(); on?.(); } }), label);
     const groups = ['OFFPLOT', 'ONPLOT', ''].map((a) => [a, model.pkgs.filter((p) => (p.area || '') === a && !p.summary)]).filter(([, l]) => l.length);
     const summ = model.pkgs.filter((p) => p.summary);
     shell('4D progress', `${model.dates[0].slice(5)} → ${model.dates[n - 1].slice(5)} · ${n} report days · ${model.count} activities`,
-      h('div', { class: 'p4-head' }, h('div', {}, h('div', { class: 'p4-kpi-l dim2' }, 'Reported progress'), kpi), h('div', { class: 'p4-date' }, dl, mp)),
-      h('div', { class: 'p4-ctl' }, play$, slider),
+      stats,
+      h('div', { class: 'p4-when' }, dl, dayL),
+      h('div', { class: 'p4-ctl' }, play$, h('div', { class: 'p4-track' }, issueMarks(), slider)),
       sCurve(),
-      planL,
+      h('div', { class: 'p4-legend p4-clegend' }, h('span', {}, h('i', { class: 'k act' }), 'Actual'), model.plan ? h('span', {}, h('i', { class: 'k plan' }), 'Planned') : null, h('span', {}, h('i', { class: 'k mp' }), 'Manpower'), h('span', {}, h('i', { class: 'p4-mark-k' }), 'Issue')),
+      heatCalendar(),
+      h('div', { class: 'p4-repbox' },
+        seg('Report period', 'repKind', [['week', 'Weekly'], ['month', 'Monthly']], repLabel),
+        repBtn),
       h('div', { class: 'p4-opts' },
-        h('label', { class: 'p4-speed' }, 'Speed', h('select', { class: 'inp', onchange: (e) => { opts.speed = +e.target.value; saveOpts(); } }, [[1, '1 day/s'], [2, '2 days/s'], [4, '4 days/s'], [8, '8 days/s'], [16, '16 days/s']].map(([v, l]) => h('option', { value: v, selected: v === opts.speed }, l)))),
+        h('div', { class: 'p4-speed' }, h('span', {}, 'Speed (days per second)'), seg('Speed', 'speed', [[1, '1'], [2, '2'], [4, '4'], [8, '8'], [16, '16']])),
         chk('Build the model up as progress advances', 'seq', redraw),
         chk('Start from an empty site at the first report', 'fromZero', redraw),
         chk('Camera follows the active work', 'follow'),
@@ -741,9 +872,8 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
           list.map(pkgRow));
       }),
       (rec.removed || []).length ? h('button', { class: 'btn sm ghost', onclick: restoreAll }, `Restore removed (${rec.removed.length})`) : null,
-      summ.length ? h('details', { class: 'p4-grp' }, h('summary', { class: 'dim2' }, `Summary rows (${summ.length}) — counted in the report, not in the overall %`), summ.map(pkgRow)) : null,
+      summ.length ? h('details', { class: 'p4-grp' }, h('summary', { class: 'dim2' }, `Summary rows (${summ.length}), shown in the report but not counted in the overall %`), summ.map(pkgRow)) : null,
       conc,
-      repBtn,
       h('div', { class: 'btn-row' },
         rec$,
         h('button', { class: 'btn sm', onclick: importBaseline, 'data-tip': 'CSV: package, start, finish' }, icon('upload'), model.plan ? 'Replace baseline' : 'Import baseline (plan)'),
@@ -751,8 +881,9 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
         h('button', { class: 'btn sm ghost', onclick: () => runAutoMap(!rec.autoReverse) }, 'Flip segment order'),
         h('button', { class: 'btn sm', onclick: importFiles }, icon('upload'), 'Add reports'),
         h('button', { class: 'btn sm', onclick: exportXlsx }, icon('download'), 'XLSX'),
+        h('button', { class: 'btn sm ghost', onclick: downloadTemplate }, icon('download'), 'CSV templates'),
         h('button', { class: 'btn sm ghost', onclick: clearData }, icon('trash'), 'Clear')),
-      h('p', { class: 'mono dim', style: { margin: 0, fontSize: '11px' } }, 'Overall % is weighted by package weight (default: number of activities; set a weight in each package). Auto-map links packages to objects by name; ◎ assigns the current selection.'));
+      h('p', { class: 'dim2', style: { margin: 0, fontSize: '12px' } }, 'Overall % is weighted by package weight (default: number of activities; set a weight in each package). Auto-map links packages to objects by name; ◎ assigns the current selection.'));
     updateLive();
     setT(t);
   }
