@@ -11,7 +11,7 @@ import { objectGeometry, searchObjects, objectName } from '../engine/objects.js'
 import { displayName } from '../engine/groups.js';
 import { baselineFromCSV } from '../engine/progress4d.js';
 import { createSequence } from '../engine/sequence4d.js';
-import { autoMap } from '../engine/automap.js';
+import { autoMap, routeOrder } from '../engine/automap.js';
 
 const OPT_KEY = 'r3d-4d';
 const AMBER = new THREE.Color(0xf5b82e), GREEN = new THREE.Color(0x2fbf71);
@@ -36,14 +36,14 @@ async function loadRecord(projectId) {
 
 export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) {
   let rec = null, model = null, t = 0, playing = false, stopTick = null, recording = false, live = [];
-  let meshIdx = null, xraySet = false, growing = [];
+  let meshIdx = null, xraySet = false, growing = [], ovGrowing = [];
   const opts = { dim: true, hideTodo: false, orbit: false, speed: 2, seq: true, fromZero: true, follow: true, hud: true, ...(() => { try { return JSON.parse(localStorage.getItem(OPT_KEY)) || {}; } catch { return {}; } })() };
   const saveOpts = () => { try { localStorage.setItem(OPT_KEY, JSON.stringify(opts)); } catch { /* storage blocked */ } };
   const touched = new Map();   // mesh → previous visibility (meshes we recoloured or hid)
   const overlays = new Map();  // `${pkg}|${meshKey}` → { mesh, ov, geo }
   const applied = new Map();   // pkg → last drawn signature
   const seq = createSequence(viewer);
-  let seqReady = false, framed = false, floatEl = null, focus = null, floatDay = -1;
+  let seqReady = false, framed = false, siteBox = null, floatEl = null, focus = null, floatDay = -1;
   const off = viewer.on('layers', () => { meshIdx = null; seqReady = false; });
 
   const save = async () => { await db.put('progress', rec); };
@@ -56,7 +56,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
 
   // ---------- drawing on the model ----------
   function clearVisuals() {
-    seq.reset(); seqReady = false; focus = null; framed = false;
+    seq.reset(); seqReady = false; focus = null; framed = false; siteBox = null;
     for (const [m, vis] of touched) { viewer.overrides.delete(m); m.visible = vis; viewer.refresh(m); }
     touched.clear();
     for (const o of overlays.values()) { o.ov.removeFromParent(); o.geo.dispose(); }
@@ -65,26 +65,51 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     if (xraySet) { viewer.setXray(false); xraySet = false; }
     viewer.requestRender();
   }
+  // Objects of a package inside a merged block are drawn as one overlay whose draw range grows with the package %:
+  // objects ordered bottom-up, then along the route, so a tank rises ring by ring and a pipe is laid end to end.
   function overlayFor(p, key, mesh, ks) {
     const id = `${p.id}|${key}`;
     let o = overlays.get(id);
     if (o) return o;
-    const geos = ks.map((k) => objectGeometry(mesh, k));
-    const geo = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
-    if (geos.length > 1) geos.forEach((g) => g.dispose());
+    const items = ks.map((k) => {
+      const g = objectGeometry(mesh, k);
+      g.computeBoundingBox();
+      const c = g.boundingBox.getCenter(new THREE.Vector3());
+      return { g, c, bb: g.boundingBox.clone(), y: Math.floor(g.boundingBox.min.y / 2) };
+    });
+    const r = routeOrder(items.map((x) => x.c));
+    items.forEach((x, i) => { x.d = r[i]; });
+    items.sort((a, b) => a.y - b.y || a.d - b.d);
+    const cum = [0];
+    for (const x of items) cum.push(cum[cum.length - 1] + x.g.index.count);
+    const geo = items.length === 1 ? items[0].g : mergeGeometries(items.map((x) => x.g), false);
+    if (items.length > 1) items.forEach((x) => x.g.dispose());
     const ov = new THREE.Mesh(geo, MAT_GHOST);
     ov.userData.helper = true;
     ov.raycast = () => {};
+    ov.frustumCulled = false;
     mesh.add(ov);
     ov.updateWorldMatrix(true, false);
-    o = { mesh, ov, geo };
+    o = { mesh, ov, geo, cum, boxes: items.map((x) => x.bb), k: 0 };
     overlays.set(id, o);
     return o;
+  }
+  function growOverlay(o, pct) {
+    const n = o.cum.length - 1;
+    const k = pct >= DONE_AT ? n : Math.min(n, Math.ceil((n * pct) / 100));
+    o.geo.setDrawRange(0, o.cum[k]);
+    o.ov.visible = k > 0;
+    // the objects that just appeared are "active work" for the camera and the build sequence
+    if (k > o.k) for (let i = Math.max(o.k, k - 6); i < k; i++) {
+      const b = o.boxes[i].clone().applyMatrix4(o.mesh.matrixWorld);
+      ovGrowing.push({ b, c: b.getCenter(new THREE.Vector3()) });
+    }
+    o.k = k;
   }
   function drawPkg(p, pct) {
     const st = stateOf(pct);
     const sig = `${st}${st === 'wip' ? Math.floor(pct / 10) : ''}${opts.hideTodo ? 'h' : ''}`;
-    if (applied.get(p.id) === sig) return;
+    const fresh = applied.get(p.id) !== sig;
     applied.set(p.id, sig);
     const mat = matFor(st, pct);
     const byMesh = new Map();
@@ -92,6 +117,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       const m = index().get(tg.key);
       if (!m) continue;
       if (tg.k == null) {
+        if (!fresh) continue;
         if (!touched.has(m)) touched.set(m, m.visible);
         m.visible = !(st === 'todo' && opts.hideTodo);
         viewer.overrides.set(m, mat);
@@ -101,9 +127,10 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     for (const [m, ks] of byMesh) {
       if (st === 'todo' && !overlays.has(`${p.id}|${m.userData.key}`)) continue; // nothing to draw yet
       const o = overlayFor(p, m.userData.key, m, ks);
-      o.ov.visible = st !== 'todo';
-      o.ov.material = mat;
+      if (fresh) o.ov.material = mat;
+      growOverlay(o, opts.seq ? pct : (st === 'todo' ? 0 : 100));
     }
+    viewer.requestRender();
   }
   function apply() {
     if (!model) return;
@@ -111,6 +138,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const dim = opts.dim && model.pkgs.some((p) => targets(p.id).length);
     if (dim && !xraySet && hasPanel()) { viewer.xray = true; viewer.refreshAll(); xraySet = true; }
     if (!dim && xraySet) { viewer.setXray(false); xraySet = false; }
+    ovGrowing = [];
     for (const p of model.pkgs) if (targets(p.id).length) drawPkg(p, pctAt(p.curve, t));
     if (opts.seq && hasPanel()) {
       if (!seqReady) {
@@ -118,7 +146,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
         for (const p of model.pkgs) {
           if (p.summary) continue;
           const ms = [];
-          for (const tg of targets(p.id)) if (tg.k == null) { const m = index().get(tg.key); if (m && !used.has(m)) { used.add(m); ms.push(m); } }
+          for (const tg of targets(p.id)) { const m = index().get(tg.key); if (!m || used.has(m)) continue; used.add(m); if (tg.k == null) ms.push(m); }
           if (ms.length) groups.push({ meshes: ms, frac: () => pctAt(p.curve, t) / 100 });
         }
         seq.prepare((m) => used.has(m), groups);
@@ -127,7 +155,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       }
       const o = pctAt(model.overall, t), o0 = pctAt(model.overall, 0);
       const frac = opts.fromZero ? (o - o0) / Math.max(1, 100 - o0) : o / 100;
-      growing = seq.set(frac);
+      growing = seq.set(frac).concat(ovGrowing);
     } else if (seqReady) { seq.reset(); seqReady = false; growing = []; }
     viewer.requestRender();
   }
@@ -151,15 +179,19 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   }
   function followCam(dt) {
     if (!opts.follow || !growing.length) return;
+    // follow the work on the main site only (a remote tie-in kilometres away would drag the camera off)
+    const site = (siteBox ||= viewer.boundsOf(null, { robust: true }).clone().expandByScalar(30));
+    const near = growing.filter((x) => site.containsPoint(x.c));
+    if (!near.length) return;
     const c = new THREE.Vector3();
-    for (const x of growing) c.add(x.c);
-    c.multiplyScalar(1 / growing.length);
+    for (const x of near) c.add(x.c);
+    c.multiplyScalar(1 / near.length);
     focus = focus ? focus.lerp(c, 1 - Math.exp(-dt * 1.6)) : c.clone();
     const ctl = viewer.controls, cam = viewer.camera;
     const delta = focus.clone().sub(ctl.target).multiplyScalar(1 - Math.exp(-dt * 2.2));
     cam.position.add(delta); ctl.target.add(delta);
     // framing distance follows the size of the active cluster, kept within a sane range for long pipelines
-    const cb = new THREE.Box3(); for (const x of growing) cb.union(x.b);
+    const cb = new THREE.Box3(); for (const x of near) cb.union(x.b);
     const want = Math.min(450, Math.max(70, cb.getSize(new THREE.Vector3()).length() * 0.9));
     const off = cam.position.clone().sub(ctl.target), d = off.length();
     if (d > 0) cam.position.copy(ctl.target).addScaledVector(off, (d + (want - d) * (1 - Math.exp(-dt * 0.9))) / d);
@@ -329,9 +361,29 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       box.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld).getCenter(c);
       descs.push({ key: m.userData.key, name: displayName(m), x: c.x, z: c.z });
     }
-    const { map, notes } = autoMap(descs, model.pkgs, { reverse });
+    const { map, notes } = autoMap(descs, model.pkgs.filter((p) => !p.hint), { reverse });
+    // packages that carry a name hint (CSV column "hint", alternatives separated by |) are matched by object name / layer
+    const blocks = viewer.meshes({ visibleOnly: false }).filter((m) => m.userData.objs);
+    const taken = new Set();
+    let byHint = 0;
+    for (const p of model.pkgs) {
+      if (!p.hint) continue;
+      const found = [];
+      for (const q of p.hint.split('|').map((x) => x.trim()).filter(Boolean)) {
+        for (const it of searchObjects(blocks, q, 50000).items) {
+          const o = it.mesh.userData.objs;
+          if (/existing/i.test(o.table.layers[o.ly[it.k]] || '')) continue; // what is already there is not built
+          const id = `${it.mesh.userData.key}|${it.k}`;
+          if (taken.has(id)) continue;
+          taken.add(id); found.push({ key: it.mesh.userData.key, k: it.k });
+        }
+        for (const m of viewer.meshes({ visibleOnly: false })) if (!m.userData.objs && !m.userData.ground && displayName(m).toLowerCase().includes(q.toLowerCase()) && !taken.has(m.userData.key)) { taken.add(m.userData.key); found.push({ key: m.userData.key }); }
+      }
+      if (found.length) { map[p.id] = found; byHint++; }
+    }
+    if (byHint) notes.push(`${byHint} packages matched by name`);
     const ids = Object.keys(map);
-    if (!ids.length) return toast('No pipe or support layers recognised in this model.', 'warn', 'Auto-map');
+    if (!ids.length) return toast('Nothing recognised in this model.', 'warn', 'Auto-map');
     for (const id of ids) rec.map[id] = map[id];
     rec.autoReverse = reverse;
     await save(); seqReady = false; redraw(); render();
@@ -523,7 +575,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       h('div', { class: 'btn-row' },
         rec$,
         h('button', { class: 'btn sm', onclick: importBaseline, 'data-tip': 'CSV: package, start, finish' }, icon('upload'), model.plan ? 'Replace baseline' : 'Import baseline (plan)'),
-        h('button', { class: 'btn sm', onclick: () => runAutoMap(false) }, icon('target'), 'Auto-map pipes'),
+        h('button', { class: 'btn sm', onclick: () => runAutoMap(false) }, icon('target'), 'Auto-map'),
         h('button', { class: 'btn sm ghost', onclick: () => runAutoMap(!rec.autoReverse) }, 'Flip segment order'),
         h('button', { class: 'btn sm', onclick: importFiles }, icon('upload'), 'Add reports'),
         h('button', { class: 'btn sm', onclick: exportXlsx }, icon('download'), 'XLSX'),

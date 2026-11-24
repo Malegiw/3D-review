@@ -114,9 +114,9 @@ export function baselineFromCSV(text, pkgs) {
     if (!m) return null;
     return m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   };
-  for (const line of text.split(/\r?\n/)) {
-    const c = line.split(/[;\t,]/).map((x) => x.trim().replace(/^"|"$/g, ''));
-    if (c.length < 3) continue;
+  const grid = parseCSV(text).map((r) => { const v = Object.values(r); return [r.package ?? r.paket ?? v[0], r.start ?? r.mulai ?? v[1], r.finish ?? r.selesai ?? v[2]]; });
+  for (const c of grid) {
+    if (!c || c.length < 3) continue;
     const start = day(c[1]), finish = day(c[2]);
     if (!start || !finish) continue;
     const k = norm(c[0]);
@@ -183,8 +183,11 @@ export function reportsFromCSV(text) {
     if (!date || !name || !desc || !Number.isFinite(pct)) continue;
     const id = (r.package_id || name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '')).slice(0, 24);
     (reports[date] ||= { rows: [], concerns: [] }).rows.push({
-      pkg: id, pkgName: name, area: (r.area || '').toUpperCase(), hint: '', summary: false, sub: '', desc, unit: r.unit || '', bq: numFlex(r.bq ?? r.volume) || 0, pct: Math.min(100, Math.max(0, pct)),
+      pkg: id, pkgName: name, area: (r.area || '').toUpperCase(), hint: r.hint || r.map || '', summary: false, sub: '', desc, unit: r.unit || '', bq: numFlex(r.bq ?? r.volume) || 0, pct: Math.min(100, Math.max(0, pct)),
     });
+    const mp = numFlex(r.manpower);
+    if (Number.isFinite(mp)) reports[date].manpower = { today: mp };
+    if (r.concern) { const c = reports[date].concerns; if (!c.includes(r.concern)) c.push(r.concern); }
   }
   return reports;
 }

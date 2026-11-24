@@ -153,7 +153,7 @@ test('weights change the overall, baseline gives a plan curve', async () => {
   assert.ok(Math.abs(m0.overall[1] - (100 + 50 * 2) / 3) < 0.01);                // default: by activity count
   const m1 = buildModel(reps, { weights: { A: 3, B: 1 } });
   assert.ok(Math.abs(m1.overall[1] - (100 * 3 + 50) / 4) < 0.01);                // custom weights
-  const { baseline, missing } = baselineFromCSV('package,start,finish\nAlpha,2026-11-01,2026-11-03\nBETA;01/11/2026;10/11/2026\nnope,2026-11-01,2026-11-02', m0.pkgs);
+  const { baseline, missing } = baselineFromCSV('package,start,finish\nAlpha,2026-11-01,2026-11-03\nBETA,01/11/2026,10/11/2026\nnope,2026-11-01,2026-11-02', m0.pkgs);
   assert.deepEqual(Object.keys(baseline).sort(), ['A', 'B']);
   assert.equal(missing.length, 1);
   const m2 = buildModel(reps, { baseline });
