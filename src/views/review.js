@@ -187,9 +187,9 @@ export async function renderReview(main, project) {
 
   // ---------- Models / layers ----------
   async function importFiles() {
-    const picked = await pickFiles({ accept: ACCEPT, multiple: true });
+    const picked = await pickFiles({ accept: ACCEPT + ',.gz', multiple: true });
     const okExt = ACCEPT.split(',').map((x) => x.slice(1));
-    const files = picked.filter((f) => okExt.includes(ext(f.name)));
+    const files = picked.filter((f) => okExt.includes(ext(f.name)) || /\.objects\.json\.gz$/i.test(f.name)); // + object list of a merged model
     if (picked.length && !files.length) return toast(`Unsupported file type: .${ext(picked[0].name)}`, 'warn');
     if (!files.length) return;
     const natives = files.filter((f) => NATIVE_EXT.includes(ext(f.name)));
@@ -215,7 +215,8 @@ export async function renderReview(main, project) {
     if (!v) return;
     const rec = { id: uid('m'), projectId: project.id, name: v.name, files: recFiles, units: v.units, zUp: v.zUp === '1', transform: { dx: 0, dy: 0, dz: 0, rotY: 0 }, visible: true, created: Date.now() };
     await db.put('models', rec);
-    viewer.addLayer({ id: rec.id, name: rec.name, kind: 'import', object, units: UNIT_SCALE[rec.units], zUp: rec.zUp });
+    const objects = await readObjects(recFiles); // merged heavy model: keep its single objects searchable
+    viewer.addLayer({ id: rec.id, name: rec.name, kind: 'import', object, units: UNIT_SCALE[rec.units], zUp: rec.zUp, objects });
     viewer.layersVer[rec.id] = rec.updated;
     await autoPlace(viewer.layers.get(rec.id), rec);
     viewer.fit();
