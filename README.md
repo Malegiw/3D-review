@@ -28,6 +28,14 @@ Tema 2026/27: putih *Cloud Dancer* (Pantone 2026), aksen *Transformative Teal* (
   Format ini closed/proprietary — tidak bisa dibaca langsung di browser, jadi dikonversi ke GLB terkompresi dulu.
 - Alternatif cepat: minta kontraktor export **FBX** (Navisworks: *Output → Export Scene → FBX*), SketchUp: *File → Export → 3D Model → glTF/DAE/FBX*.
 
+
+### 4D v2 (0.9)
+- **Build sequence:** the model builds itself in construction order (civil → supports → equipment → piping → electrical); layers named *existing* stay put. Packages mapped to objects reveal by their own %, pipes along their route.
+- **Auto-map pipes:** pipe nodes (`MGNO-…`) are split into the header segments along the route; support nodes → pipe-support piling. *Flip segment order* if segment 1 is at the other end.
+- **Plan vs actual:** import a baseline CSV (`package, start, finish`); the S-curve shows the plan (dashed) and ahead/behind.
+- **Weights:** per-package weight for the overall % (default = number of activities).
+- Offplot/Onplot groups collapse; packages or whole groups can be removed from 4D and restored.
+
 ## Jalankan lokal
 
 ```bash

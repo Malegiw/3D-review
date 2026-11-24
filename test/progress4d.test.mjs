@@ -141,3 +141,22 @@ test('XLSX export is a zip', async () => {
   const head = Buffer.from(await blob.arrayBuffer()).subarray(0, 2).toString();
   assert.equal(head, 'PK');
 });
+
+import { baselineFromCSV, planAt } from '../src/engine/progress4d.js';
+test('weights change the overall, baseline gives a plan curve', async () => {
+  const mk = (d, a, b) => ({ date: d, rows: [
+    { pkg: 'A', pkgName: 'Alpha', area: 'OFFPLOT', desc: 'a1', unit: 'm', bq: 10, total: a, pct: a, remark: '' },
+    { pkg: 'B', pkgName: 'Beta', area: 'OFFPLOT', desc: 'b1', unit: 'm', bq: 10, total: b, pct: b, remark: '' },
+    { pkg: 'B', pkgName: 'Beta', area: 'OFFPLOT', desc: 'b2', unit: 'm', bq: 10, total: b, pct: b, remark: '' }] });
+  const reps = { '2026-11-01': mk('2026-11-01', 0, 0), '2026-11-03': mk('2026-11-03', 100, 50) };
+  const m0 = buildModel(reps);
+  assert.ok(Math.abs(m0.overall[1] - (100 + 50 * 2) / 3) < 0.01);                // default: by activity count
+  const m1 = buildModel(reps, { weights: { A: 3, B: 1 } });
+  assert.ok(Math.abs(m1.overall[1] - (100 * 3 + 50) / 4) < 0.01);                // custom weights
+  const { baseline, missing } = baselineFromCSV('package,start,finish\nAlpha,2026-11-01,2026-11-03\nBETA;01/11/2026;10/11/2026\nnope,2026-11-01,2026-11-02', m0.pkgs);
+  assert.deepEqual(Object.keys(baseline).sort(), ['A', 'B']);
+  assert.equal(missing.length, 1);
+  const m2 = buildModel(reps, { baseline });
+  assert.equal(Math.round(m2.plan[1]), Math.round((100 * 1 + planAt(Date.parse('2026-11-03'), Date.parse('2026-11-01'), Date.parse('2026-11-10')) * 2) / 3));
+  assert.equal(planAt(0, 1, 2), 0); assert.equal(planAt(3, 1, 2), 100);
+});
