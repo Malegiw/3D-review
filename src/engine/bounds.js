@@ -27,7 +27,48 @@ export function robustBounds(boxes, { trim = 0.02, maxDropped = 0.05 } = {}) {
     return c[k] >= lo[i] - pad && c[k] <= hi[i] + pad;
   }));
   const dropped = keep.reduce((n, k) => n + (k ? 0 : 1), 0);
-  if (!dropped || dropped > valid.length * maxDropped) return all();
-  valid.forEach((b, i) => { if (keep[i]) box.union(b); });
+  if (dropped > valid.length * maxDropped) return mainSite(valid, centres) || all();
+  if (!dropped) return mainSite(valid, centres) || all();
+  const kv = valid.filter((_, i) => keep[i]);
+  const site = mainSite(kv, centres.filter((_, i) => keep[i]));
+  if (site) return { box: site.box, dropped: dropped + site.dropped };
+  kv.forEach((b) => box.union(b));
   return { box, dropped };
+}
+
+/**
+ * One file can hold two sites kilometres apart (e.g. a station and a remote tie-in). Group box centres into connected
+ * plan cells (gap ≤ ~one cell) and, when one group clearly dominates (≥ 80 % of the objects) and the groups are far
+ * apart, frame that group only.
+ */
+export function mainSite(valid, centres = valid.map((b) => b.getCenter(new THREE.Vector3())), { cell = 250, share = 0.8, minGap = 1000 } = {}) {
+  if (valid.length < 12) return null;
+  const key = (c) => `${Math.floor(c.x / cell)},${Math.floor(c.z / cell)}`;
+  const cells = new Map();
+  centres.forEach((c, i) => { const k = key(c); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(i); });
+  const seen = new Set(), groups = [];
+  for (const k of cells.keys()) {
+    if (seen.has(k)) continue;
+    const g = [], st = [k]; seen.add(k);
+    while (st.length) {
+      const q = st.pop(); g.push(...cells.get(q));
+      const [x, z] = q.split(',').map(Number);
+      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+        const n = `${x + dx},${z + dz}`;
+        if (cells.has(n) && !seen.has(n)) { seen.add(n); st.push(n); }
+      }
+    }
+    groups.push(g);
+  }
+  if (groups.length < 2) return null;
+  groups.sort((a, b) => b.length - a.length);
+  const main = groups[0];
+  if (main.length < valid.length * share) return null;
+  const box = new THREE.Box3();
+  for (const i of main) box.union(valid[i]);
+  const other = new THREE.Box3();
+  for (const g of groups.slice(1)) for (const i of g) other.union(valid[i]);
+  const gap = Math.max(other.min.x - box.max.x, box.min.x - other.max.x, other.min.z - box.max.z, box.min.z - other.max.z);
+  if (gap < minGap) return null;
+  return { box, dropped: valid.length - main.length };
 }
