@@ -22,7 +22,7 @@ export const DONE_AT = 99.5; // % at which a package counts as complete
  * so a row that is new today, in a package where a row went missing and reads alike (≥ 55 % shared words), continues
  * that activity. Before its first report an activity counts 0 %; after its last report it keeps its last value.
  */
-export function buildModel(reports) {
+export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
   const dates = Object.keys(reports || {}).sort();
   const pkgs = new Map();
   const byKey = new Map();
@@ -74,14 +74,57 @@ export function buildModel(reports) {
     for (let i = 0; i < D; i++) p.curve[i] = p.acts.length ? p.acts.reduce((s, a) => s + a.pct[i], 0) / p.acts.length : 0;
   }
   const real = [...pkgs.values()].filter((p) => !p.summary);
-  const total = real.reduce((n, p) => n + p.acts.length, 0) || 1;
+  // package weight: user value if given, otherwise the number of activities (= plain activity average)
+  for (const p of real) p.w = Number(weights[p.id]) > 0 ? Number(weights[p.id]) : p.acts.length;
+  const total = real.reduce((n, p) => n + p.w, 0) || 1;
   const overall = new Float32Array(D);
-  for (let i = 0; i < D; i++) overall[i] = real.reduce((s, p) => s + p.curve[i] * p.acts.length, 0) / total;
+  for (let i = 0; i < D; i++) overall[i] = real.reduce((s, p) => s + p.curve[i] * p.w, 0) / total;
+  // planned progress from a baseline {pkgId: {start, finish}} — S-shaped (smoothstep) between the two dates
+  let plan = null;
+  const withPlan = real.filter((p) => baseline[p.id]?.start && baseline[p.id]?.finish);
+  if (withPlan.length) {
+    for (const p of withPlan) {
+      const a = Date.parse(baseline[p.id].start), z = Date.parse(baseline[p.id].finish);
+      p.plan = Float32Array.from(dates, (d) => planAt(Date.parse(d), a, z));
+    }
+    const wt = withPlan.reduce((n, p) => n + p.w, 0) || 1;
+    plan = new Float32Array(D);
+    for (let i = 0; i < D; i++) plan[i] = withPlan.reduce((s, p) => s + p.plan[i] * p.w, 0) / wt;
+    // actual of the same packages, so plan and actual are compared like for like
+    plan.actual = new Float32Array(D);
+    for (let i = 0; i < D; i++) plan.actual[i] = withPlan.reduce((s, p) => s + p.curve[i] * p.w, 0) / wt;
+    plan.covered = withPlan.length;
+  }
   const manpower = dates.map((d) => reports[d].manpower?.today ?? null);
-  return { dates, pkgs: [...pkgs.values()], overall, manpower, count: total, concerns: Object.fromEntries(dates.map((d) => [d, reports[d].concerns || []])) };
+  return { dates, pkgs: [...pkgs.values()], overall, plan, manpower, count: real.reduce((n, p) => n + p.acts.length, 0), concerns: Object.fromEntries(dates.map((d) => [d, reports[d].concerns || []])) };
 }
 
 /** Progress (%) of a package at fractional day index t (0 … dates-1), interpolated between report days. */
+export function planAt(t, a, z) {
+  if (!(z > a)) return t >= z ? 100 : 0;
+  const x = Math.min(1, Math.max(0, (t - a) / (z - a)));
+  return 100 * x * x * (3 - 2 * x);
+}
+/** Baseline CSV: package, start, finish (YYYY-MM-DD or DD/MM/YYYY). Package = id or name, case-insensitive. */
+export function baselineFromCSV(text, pkgs) {
+  const out = {}, miss = [];
+  const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const day = (x) => {
+    const m = String(x || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/) || String(x || '').trim().match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+    if (!m) return null;
+    return m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  };
+  for (const line of text.split(/\r?\n/)) {
+    const c = line.split(/[;\t,]/).map((x) => x.trim().replace(/^"|"$/g, ''));
+    if (c.length < 3) continue;
+    const start = day(c[1]), finish = day(c[2]);
+    if (!start || !finish) continue;
+    const k = norm(c[0]);
+    const p = pkgs.find((q) => norm(q.id) === k || norm(q.name) === k);
+    if (p) out[p.id] = { start, finish }; else miss.push(c[0]);
+  }
+  return { baseline: out, missing: miss };
+}
 export function pctAt(curve, t) {
   const n = curve.length;
   if (!n) return 0;
@@ -152,6 +195,7 @@ export function buildProgressXlsx(model, { project = '' } = {}) {
   const dcols = ds.map((d, i) => ({ header: d.slice(5), key: `d${i}`, width: 8, type: 'n', dp: 1 }));
   const pk = model.pkgs.map((p) => ({ package: p.name, area: p.area, acts: p.acts.length, ...Object.fromEntries(ds.map((_, i) => [`d${i}`, p.curve[i]])) }));
   pk.push({ package: 'OVERALL (activity-weighted, excl. summaries)', area: '', acts: model.count, ...Object.fromEntries(ds.map((_, i) => [`d${i}`, model.overall[i]])) });
+  if (model.plan) pk.push({ package: `PLAN (baseline, ${model.plan.covered} packages)`, area: '', acts: '', ...Object.fromEntries(ds.map((_, i) => [`d${i}`, model.plan[i]])) });
   pk.push({ package: 'Manpower (people on site)', area: '', acts: '', ...Object.fromEntries(ds.map((_, i) => [`d${i}`, model.manpower[i] ?? ''])) });
   const act = [];
   for (const p of model.pkgs) for (const a of p.acts) act.push({ package: p.name, activity: a.desc, unit: a.unit, bq: a.bq, ...Object.fromEntries(ds.map((_, i) => [`d${i}`, a.pct[i]])) });

@@ -9,7 +9,9 @@ import { linesOfPdf, parseReport, dateFromName } from '../engine/dailyreport.js'
 import { buildModel, pctAt, stateOf, activitiesAt, buildProgressXlsx, reportsFromCSV, mergeReports, slimReport, DONE_AT } from '../engine/progress4d.js';
 import { objectGeometry, searchObjects, objectName } from '../engine/objects.js';
 import { displayName } from '../engine/groups.js';
+import { baselineFromCSV } from '../engine/progress4d.js';
 import { createSequence } from '../engine/sequence4d.js';
+import { autoMap } from '../engine/automap.js';
 
 const OPT_KEY = 'r3d-4d';
 const AMBER = new THREE.Color(0xf5b82e), GREEN = new THREE.Color(0x2fbf71);
@@ -41,7 +43,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   const overlays = new Map();  // `${pkg}|${meshKey}` → { mesh, ov, geo }
   const applied = new Map();   // pkg → last drawn signature
   const seq = createSequence(viewer);
-  let seqReady = false, floatEl = null, focus = null, floatDay = -1;
+  let seqReady = false, framed = false, floatEl = null, focus = null, floatDay = -1;
   const off = viewer.on('layers', () => { meshIdx = null; seqReady = false; });
 
   const save = async () => { await db.put('progress', rec); };
@@ -54,12 +56,12 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
 
   // ---------- drawing on the model ----------
   function clearVisuals() {
+    seq.reset(); seqReady = false; focus = null; framed = false;
     for (const [m, vis] of touched) { viewer.overrides.delete(m); m.visible = vis; viewer.refresh(m); }
     touched.clear();
     for (const o of overlays.values()) { o.ov.removeFromParent(); o.geo.dispose(); }
     overlays.clear();
     applied.clear();
-    seq.reset(); seqReady = false; focus = null;
     if (xraySet) { viewer.setXray(false); xraySet = false; }
     viewer.requestRender();
   }
@@ -112,9 +114,16 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     for (const p of model.pkgs) if (targets(p.id).length) drawPkg(p, pctAt(p.curve, t));
     if (opts.seq && hasPanel()) {
       if (!seqReady) {
-        const hand = new Set(); for (const p of model.pkgs) for (const tg of targets(p.id)) if (tg.k == null) hand.add(tg.key);
-        seq.prepare((m) => hand.has(m.userData.key));
+        const used = new Set(), groups = [];
+        for (const p of model.pkgs) {
+          if (p.summary) continue;
+          const ms = [];
+          for (const tg of targets(p.id)) if (tg.k == null) { const m = index().get(tg.key); if (m && !used.has(m)) { used.add(m); ms.push(m); } }
+          if (ms.length) groups.push({ meshes: ms, frac: () => pctAt(p.curve, t) / 100 });
+        }
+        seq.prepare((m) => used.has(m), groups);
         seqReady = true;
+        if (!framed) { framed = true; frameAll(); }
       }
       const o = pctAt(model.overall, t), o0 = pctAt(model.overall, 0);
       const frac = opts.fromZero ? (o - o0) / Math.max(1, 100 - o0) : o / 100;
@@ -130,6 +139,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     apply();
     updateLive(fromSlider);
     updateFloat();
+    if (!playing) followCam(2);
     const di = Math.round(t);
     viewer.setHud(`4D · ${fmt.date(model.dates[di])}`, `Progress ${pct1(pctAt(model.overall, t))} · day ${di + 1}/${N()}`);
   }
@@ -148,10 +158,11 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const ctl = viewer.controls, cam = viewer.camera;
     const delta = focus.clone().sub(ctl.target).multiplyScalar(1 - Math.exp(-dt * 2.2));
     cam.position.add(delta); ctl.target.add(delta);
-    // keep a framing distance proportional to the site, gently tightening on the active zone
-    const want = Math.max(30, seq.bounds().getSize(new THREE.Vector3()).length() * 0.42);
+    // framing distance follows the size of the active cluster, kept within a sane range for long pipelines
+    const cb = new THREE.Box3(); for (const x of growing) cb.union(x.b);
+    const want = Math.min(450, Math.max(70, cb.getSize(new THREE.Vector3()).length() * 0.9));
     const off = cam.position.clone().sub(ctl.target), d = off.length();
-    if (d > 0) cam.position.copy(ctl.target).addScaledVector(off, (d + (want - d) * (1 - Math.exp(-dt * 0.8))) / d);
+    if (d > 0) cam.position.copy(ctl.target).addScaledVector(off, (d + (want - d) * (1 - Math.exp(-dt * 0.9))) / d);
     ctl.update();
   }
   function frameAll() {
@@ -248,7 +259,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   function rebuild(toEnd = false) {
     const ex = new Set(rec.removed || []);
     const reps = ex.size ? Object.fromEntries(Object.entries(rec.reports).map(([d, r]) => [d, { ...r, rows: (r.rows || []).filter((x) => !ex.has(x.pkg)) }])) : rec.reports;
-    model = Object.keys(rec.reports).length ? buildModel(reps) : null;
+    model = Object.keys(rec.reports).length ? buildModel(reps, { weights: rec.weights || {}, baseline: rec.baseline || {} }) : null;
     if (model) t = toEnd ? model.dates.length - 1 : Math.min(t, model.dates.length - 1); else t = 0;
   }
   async function importFiles() {
@@ -288,13 +299,44 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   async function clearData() {
     if (!(await confirmDialog('Remove all imported reports and the object mapping of this project?', { title: 'Clear 4D data', okLabel: 'Clear', danger: true }))) return;
     stop(); clearVisuals();
-    rec.reports = {}; rec.map = {};
+    rec.reports = {}; rec.map = {}; rec.baseline = {}; rec.weights = {}; rec.removed = [];
     await save();
     rebuild();
     refresh();
   }
 
   // ---------- mapping ----------
+  async function importBaseline() {
+    const [f] = await pickFiles({ accept: '.csv,.txt' });
+    if (!f) return;
+    const { baseline, missing } = baselineFromCSV(await f.text(), model.pkgs);
+    const n = Object.keys(baseline).length;
+    if (!n) return toast('No rows matched. Use columns: package, start, finish (package = name or id).', 'warn', 'Baseline');
+    rec.baseline = baseline; await save(); rebuild(); render();
+    toast(`${n} packages have a plan${missing.length ? ` · ${missing.length} rows not matched` : ''}.`, 'ok', 'Baseline');
+  }
+  async function setWeight(p, v) {
+    rec.weights = { ...(rec.weights || {}) };
+    if (v > 0) rec.weights[p.id] = v; else delete rec.weights[p.id];
+    await save(); rebuild(); render();
+  }
+  async function runAutoMap(reverse = false) {
+    const descs = [];
+    const box = new THREE.Box3(), c = new THREE.Vector3();
+    for (const m of viewer.meshes({ visibleOnly: false })) {
+      if (m.userData.ground || !m.geometry) continue;
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      box.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld).getCenter(c);
+      descs.push({ key: m.userData.key, name: displayName(m), x: c.x, z: c.z });
+    }
+    const { map, notes } = autoMap(descs, model.pkgs, { reverse });
+    const ids = Object.keys(map);
+    if (!ids.length) return toast('No pipe or support layers recognised in this model.', 'warn', 'Auto-map');
+    for (const id of ids) rec.map[id] = map[id];
+    rec.autoReverse = reverse;
+    await save(); seqReady = false; redraw(); render();
+    toast(`${notes.join(' · ')}. Check the order of segments; flip it if segment 1 is at the other end.`, 'ok', 'Auto-mapped');
+  }
   function selectionTargets() {
     const po = viewer.pickedObj;
     if (po) return [{ key: po.mesh.userData.key, k: po.k, name: objectName(po.mesh.userData.objs, po.k) }];
@@ -377,6 +419,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       [0, 50, 100].map((g) => h('line', { svg: true, x1: P, x2: W - P, y1: ys(g), y2: ys(g), stroke: 'var(--line)', 'stroke-width': 1 })),
       h('polygon', { svg: true, points: `${xs(0)},${ys(0)} ${pts.join(' ')} ${xs(n - 1)},${ys(0)}`, fill: 'var(--cyan)', opacity: 0.1 }),
       h('polyline', { svg: true, points: pts.join(' '), fill: 'none', stroke: 'var(--cyan)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }),
+      model.plan ? h('polyline', { svg: true, points: Array.from(model.plan, (v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' '), fill: 'none', stroke: 'var(--amber, #f5b82e)', 'stroke-width': 1.6, 'stroke-dasharray': '4 3' }) : null,
       cur, dot);
   }
   function pkgRow(p) {
@@ -409,6 +452,9 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
             btn('focus', 'Zoom to package', () => zoom(p)),
             n ? btn('x', 'Clear mapping', () => unassign(p)) : null,
             btn('trash', 'Remove package from 4D', () => removePkgs([p.id], `“${p.name}”`))))),
+      h('label', { class: 'p4-w' }, h('span', { class: 'dim2' }, 'Weight'),
+        h('input', { type: 'number', min: 0, step: 'any', placeholder: String(p.acts.length), value: rec.weights?.[p.id] ?? '', 'aria-label': `Weight of ${p.name}`, onchange: (e) => setWeight(p, +e.target.value) }),
+        h('span', { class: 'dim2' }, rec.weights?.[p.id] ? 'custom' : 'default = activity count')),
       acts);
   }
   function render() {
@@ -428,8 +474,14 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const play$ = h('button', { class: 'btn primary icon', 'aria-label': 'Play', onclick: () => (playing ? stop() : play()) });
     const rec$ = h('button', { class: 'btn sm mag', onclick: playRecord }, h('span', { class: 'rec-dot' }), 'Play & record');
     const conc = h('div', { class: 'p4-conc' });
+    const planL = h('div', { class: 'p4-plan mono' });
     live.push((fromSlider) => {
       kpi.textContent = pct1(pctAt(model.overall, t));
+      if (model.plan) {
+        const pl = pctAt(model.plan, t), ac = pctAt(model.plan.actual, t), d = ac - pl;
+        planL.textContent = `Plan ${pct1(pl)} · actual ${pct1(ac)} · ${Math.abs(d) < 0.05 ? 'on plan' : d > 0 ? `ahead ${d.toFixed(1)}%` : `behind ${(-d).toFixed(1)}%`} (${model.plan.covered} pkgs with baseline)`;
+        planL.style.color = d < -0.05 ? 'var(--red, #e5484d)' : 'var(--green, #2fbf71)';
+      } else planL.textContent = '';
       dl.textContent = fmt.date(model.dates[di()]);
       mp.textContent = model.manpower[di()] != null ? `${model.manpower[di()]} people on site · day ${di() + 1}/${n}` : `day ${di() + 1}/${n}`;
       if (!fromSlider) slider.value = t;
@@ -445,6 +497,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       h('div', { class: 'p4-head' }, h('div', {}, h('div', { class: 'p4-kpi-l dim2' }, 'Reported progress'), kpi), h('div', { class: 'p4-date' }, dl, mp)),
       h('div', { class: 'p4-ctl' }, play$, slider),
       sCurve(),
+      planL,
       h('div', { class: 'p4-opts' },
         h('label', { class: 'p4-speed' }, 'Speed', h('select', { class: 'inp', onchange: (e) => { opts.speed = +e.target.value; saveOpts(); } }, [[1, '1 day/s'], [2, '2 days/s'], [4, '4 days/s'], [8, '8 days/s']].map(([v, l]) => h('option', { value: v, selected: v === opts.speed }, l)))),
         chk('Build the model up as progress advances', 'seq', redraw),
@@ -469,6 +522,9 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       conc,
       h('div', { class: 'btn-row' },
         rec$,
+        h('button', { class: 'btn sm', onclick: importBaseline, 'data-tip': 'CSV: package, start, finish' }, icon('upload'), model.plan ? 'Replace baseline' : 'Import baseline (plan)'),
+        h('button', { class: 'btn sm', onclick: () => runAutoMap(false) }, icon('target'), 'Auto-map pipes'),
+        h('button', { class: 'btn sm ghost', onclick: () => runAutoMap(!rec.autoReverse) }, 'Flip segment order'),
         h('button', { class: 'btn sm', onclick: importFiles }, icon('upload'), 'Add reports'),
         h('button', { class: 'btn sm', onclick: exportXlsx }, icon('download'), 'XLSX'),
         h('button', { class: 'btn sm ghost', onclick: clearData }, icon('trash'), 'Clear')),
