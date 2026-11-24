@@ -81,7 +81,25 @@
       "objects": 19499,
       "engine": "nwd-reader",
       "converted": "2026-11-12T01:38:36.364Z"
+    },
+    {
+      "name": "FEED-RWD-SLO_Seruni-Waterflood_WO-133_25082025",
+      "file": "1795497825001-feed-rwd-slo-seruni-waterflood-wo-133-25082025.glb",
+      "source": "1795497825001-FEED-RWD-SLO_Seruni-Waterflood_WO-133_25082025.nwd",
+      "size": 18201844,
+      "units": "m",
+      "zUp": false,
+      "origin": [
+        1516,
+        0,
+        -460
+      ],
+      "objects": 44282,
+      "merged": true,
+      "objectsFile": "1795497825001-feed-rwd-slo-seruni-waterflood-wo-133-25082025.objects.json.gz",
+      "engine": "nwd-reader",
+      "converted": "2026-11-24T05:25:36.471Z"
     }
   ],
-  "updated": "2026-11-12T01:38:36.374Z"
+  "updated": "2026-11-24T05:25:36.478Z"
 }
