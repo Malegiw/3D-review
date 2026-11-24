@@ -86,6 +86,7 @@ export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
     for (const p of withPlan) {
       const a = Date.parse(baseline[p.id].start), z = Date.parse(baseline[p.id].finish);
       p.plan = Float32Array.from(dates, (d) => planAt(Date.parse(d), a, z));
+      p.bl = { start: baseline[p.id].start, finish: baseline[p.id].finish };
     }
     const wt = withPlan.reduce((n, p) => n + p.w, 0) || 1;
     plan = new Float32Array(D);
