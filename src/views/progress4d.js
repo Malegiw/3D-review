@@ -2,7 +2,7 @@
 //   import PDF/CSV  →  pick objects in 3D and assign them to a work package  →  scrub or play the timeline / record a video.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { h, icon, toast, formDialog, confirmDialog, pickFiles, download, fmt, uid } from '../core/ui.js';
+import { h, icon, toast, formDialog, confirmDialog, pickFiles, download, fmt, uid, modal } from '../core/ui.js';
 import { db } from '../core/db.js';
 import { openPdf, closePdf } from '../engine/pdf.js';
 import { linesOfPdf, parseReport, dateFromName } from '../engine/dailyreport.js';
@@ -10,10 +10,14 @@ import { buildModel, pctAt, stateOf, activitiesAt, buildProgressXlsx, reportsFro
 import { objectGeometry, searchObjects, objectName } from '../engine/objects.js';
 import { displayName } from '../engine/groups.js';
 import { baselineFromCSV } from '../engine/progress4d.js';
+import { parseSchedule, scheduleToBaseline } from '../engine/schedule.js';
 import { createSequence } from '../engine/sequence4d.js';
 import { autoMap, routeOrder } from '../engine/automap.js';
 import { reportHtml } from '../engine/report4d.js';
 import { currentLang, t as tr } from '../core/i18n.js';
+import { repoClient } from '../core/jobs.js';
+import { toBase64 } from '../engine/github.js';
+import { SYNC_DIR, syncName, pack4d, unpack4d } from '../engine/sync4d.js';
 
 const OPT_KEY = 'r3d-4d';
 const AMBER = new THREE.Color(0xf5b82e), GREEN = new THREE.Color(0x2fbf71);
@@ -35,6 +39,9 @@ async function loadRecord(projectId) {
   const rows = await db.byProject('progress', projectId);
   return rows[0] || { id: uid('pg'), projectId, reports: {}, map: {}, created: Date.now() };
 }
+
+const PEOPLE = /\/(copy-of-)?(wo)?m[ae]n\d*\b|\/(person|people|human)\b/i;
+const rupiah = (v) => (v >= 1e9 ? `Rp ${(v / 1e9).toLocaleString('id-ID', { maximumFractionDigits: 2 })} M` : v >= 1e6 ? `Rp ${(v / 1e6).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jt` : `Rp ${Math.round(v).toLocaleString('id-ID')}`);
 
 export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) {
   let rec = null, model = null, t = 0, playing = false, stopTick = null, recording = false, live = [];
@@ -372,7 +379,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   function rebuild(toEnd = false) {
     const ex = new Set(rec.removed || []);
     const reps = ex.size ? Object.fromEntries(Object.entries(rec.reports).map(([d, r]) => [d, { ...r, rows: (r.rows || []).filter((x) => !ex.has(x.pkg)) }])) : rec.reports;
-    model = Object.keys(rec.reports).length ? buildModel(reps, { weights: rec.weights || {}, baseline: rec.baseline || {} }) : null;
+    model = Object.keys(rec.reports).length ? buildModel(reps, { weights: rec.weights || {}, baseline: rec.baseline || {}, weighting: rec.weighting || 'count' }) : null;
     if (model) t = toEnd ? model.dates.length - 1 : Math.min(t, model.dates.length - 1); else t = 0;
   }
   async function importFiles() {
@@ -431,7 +438,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       if (two) { const s2 = viewer.coverShot(1600, 1.45, all.clone().expandByScalar(10)); if (s2) images.push({ src: s2, caption: `${currentLang() === 'id' ? 'Keseluruhan' : 'Whole site'} · ${cap}` }); }
     } catch (e) { console.warn(e); }
     const html = reportHtml(model, di, {
-      kind, project: project.name || project.code || '', lang: currentLang(), simulated: !!rec.demo, images, dateFmt: (d) => fmt.date(d),
+      kind, project: project.name || project.code || '', lang: currentLang(), simulated: !!rec.demo, images, dateFmt: (d) => fmt.date(d), baselineSrc: model.plan ? rec.baselineSrc || '' : '',
     });
     const name = `Laporan-${kind === 'month' ? 'bulanan' : 'mingguan'}_${(project.code || project.name || 'proyek').replace(/[^\w-]+/g, '_')}_${model.dates[di]}.html`;
     const blob = new Blob([html], { type: 'text/html' });
@@ -462,10 +469,12 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const base = (p) => new URL(`samples/seruni/${p}`, document.baseURI).href;
     try {
       viewer.setHud('Loading demo data', 'Seruni Waterflood (simulated)');
-      const [csv, bl] = await Promise.all(['Seruni_WF_daily_report_SIMULASI.csv', 'Seruni_WF_baseline_SIMULASI.csv'].map((f) => fetch(base(f)).then((r) => { if (!r.ok) throw new Error(`${f}: HTTP ${r.status}`); return r.text(); })));
+      const [csv, xer] = await Promise.all(['Seruni_WF_daily_report_SIMULASI.csv', 'Seruni_WF_baseline_SIMULASI.xer'].map((f) => fetch(base(f)).then((r) => { if (!r.ok) throw new Error(`${f}: HTTP ${r.status}`); return r.text(); })));
       rec.reports = mergeReports(rec.reports, reportsFromCSV(csv));
       rebuild(true);
-      rec.baseline = baselineFromCSV(bl, model.pkgs).baseline;
+      rec.baseline = scheduleToBaseline(parseSchedule('baseline.xer', xer), model.pkgs).baseline;
+      rec.baselineSrc = 'Primavera P6 (XER) · Seruni_WF_baseline_SIMULASI.xer';
+      rec.weighting = 'value';
       rec.demo = true;
       await save(); clearVisuals(); rebuild(true);
       viewer.setHud('');
@@ -480,22 +489,91 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
   async function clearData() {
     if (!(await confirmDialog('Remove all imported reports and the object mapping of this project?', { title: 'Clear 4D data', okLabel: 'Clear', danger: true }))) return;
     stop(); clearVisuals();
-    rec.reports = {}; rec.map = {}; rec.baseline = {}; rec.weights = {}; rec.removed = []; rec.demo = false;
+    rec.reports = {}; rec.map = {}; rec.baseline = {}; rec.weights = {}; rec.removed = []; rec.demo = false; rec.weighting = 'count'; rec.baselineSrc = '';
     await save();
     rebuild();
     refresh();
   }
 
   // ---------- mapping ----------
+  // baseline: Primavera P6 (.xer), Microsoft Project (.xml, MSPDI) at activity level, or a simple CSV per package
   async function importBaseline() {
-    const [f] = await pickFiles({ accept: '.csv,.txt' });
+    const [f] = await pickFiles({ accept: '.xer,.xml,.csv,.txt' });
     if (!f) return;
-    const { baseline, missing } = baselineFromCSV(await f.text(), model.pkgs);
+    const text = await f.text();
+    try {
+      const sch = parseSchedule(f.name, text);
+      if (sch) {
+        const r = scheduleToBaseline(sch, model.pkgs);
+        if (!r.packages) return toast(`No package or activity in ${sch.source} matched the daily reports. Activity names or WBS names must match the report.`, 'warn', 'Baseline');
+        rec.baseline = r.baseline; rec.baselineSrc = `${sch.source} · ${f.name}`;
+        await save(); rebuild(); render();
+        return toast(`${sch.source}: ${r.packages} packages and ${r.matchedActs} of ${r.totalActs} activities matched.`, 'ok', 'Baseline');
+      }
+    } catch (e) { return toast(e.message, 'err', 'Baseline'); }
+    const { baseline, missing } = baselineFromCSV(text, model.pkgs);
     const n = Object.keys(baseline).length;
     if (!n) return toast('No rows matched. Use columns: package, start, finish (package = name or id).', 'warn', 'Baseline');
-    rec.baseline = baseline; await save(); rebuild(); render();
+    rec.baseline = baseline; rec.baselineSrc = `CSV · ${f.name}`; await save(); rebuild(); render();
     toast(`${n} packages have a plan${missing.length ? ` · ${missing.length} rows not matched` : ''}.`, 'ok', 'Baseline');
   }
+  // ---------- 4D data on GitHub (same data on every device and for the team) ----------
+  async function syncClient() {
+    const gh = await repoClient();
+    if (!gh) { toast('Connect GitHub first: Settings, then Converter (repository and token). The 4D data is stored in that repository.', 'warn', 'GitHub'); return null; }
+    return gh;
+  }
+  async function saveToGitHub() {
+    const gh = await syncClient(); if (!gh) return;
+    try {
+      const info = await gh.info();
+      const path = `${SYNC_DIR}/${syncName(project)}`;
+      if (!info.private && !rec.publicOk) {
+        const ok = await confirmDialog(`${gh.slug} is a public repository, so anyone with the link can read the 4D data (reports, baseline, weights). Save it there anyway?`, { title: 'Save 4D data to GitHub', okLabel: 'Save to public repository' });
+        if (!ok) return;
+        rec.publicOk = true; await save();
+      }
+      viewer.setHud('Saving 4D data to GitHub', path);
+      const bytes = await pack4d(rec, project);
+      await gh.putFile(path, toBase64(bytes), `4D data: ${project.name || project.code || 'project'} (${Object.keys(rec.reports).length} reports)`);
+      rec.syncedAt = new Date().toISOString(); rec.syncPath = path; await save();
+      viewer.setHud('');
+      toast(`Saved to ${gh.slug}/${path} (${(bytes.length / 1024).toFixed(0)} KB). Open this project on another device and use Load from GitHub.`, 'ok', 'GitHub');
+      render();
+    } catch (e) { viewer.setHud(''); toast(e.message, 'err', 'GitHub'); }
+  }
+  async function loadFromGitHub() {
+    const gh = await syncClient(); if (!gh) return;
+    try {
+      const files = (await gh.listDir(SYNC_DIR)).filter((f) => /\.4d\.json(\.gz)?$/.test(f.name));
+      if (!files.length) return toast(`No 4D data in ${gh.slug}/${SYNC_DIR} yet. Save it from the device that has the reports.`, 'info', 'GitHub');
+      const mine = syncName(project);
+      let pick = files.find((f) => f.name === mine)?.name;
+      if (!pick) {
+        pick = await new Promise((resolve) => {
+          let dlg = null;
+          dlg = modal({
+            title: 'Load 4D data from GitHub', body: h('div', { class: 'p4-pick' }, files.map((f) => h('button', { class: 'btn', type: 'button', onclick: () => dlg?.close(f.name) }, icon('download'), `${f.name.replace(/\.4d\.json(\.gz)?$/, '')} · ${(f.size / 1024).toFixed(0)} KB`))),
+            actions: [{ label: 'Cancel', value: null }], onClose: (v) => resolve(v || null),
+          });
+        });
+        if (!pick) return;
+      }
+      viewer.setHud('Loading 4D data from GitHub', pick);
+      const { fields, saved } = await unpack4d(await gh.download(`${SYNC_DIR}/${pick}`));
+      if (Object.keys(rec.reports || {}).length && !(await confirmDialog(`Replace the 4D data on this device with ${pick} (saved ${fmt.date(saved?.slice(0, 10))})?`, { title: 'Load 4D data', okLabel: 'Replace' }))) { viewer.setHud(''); return; }
+      clearVisuals();
+      for (const k of ['reports', 'baseline', 'baselineSrc', 'weights', 'weighting', 'removed', 'map', 'demo']) rec[k] = fields[k] ?? (k === 'reports' || k === 'baseline' || k === 'weights' || k === 'map' ? {} : k === 'removed' ? [] : rec[k]);
+      rec.syncedAt = saved; rec.syncPath = `${SYNC_DIR}/${pick}`;
+      await save(); rebuild(true);
+      viewer.setHud('');
+      // object keys differ between devices, so the mapping is redone by name when the stored one does not fit this model
+      const fits = Object.values(rec.map || {}).flat().some((tg) => index().has(tg.key));
+      if (viewer.layers.size && !fits) await runAutoMap(!!rec.autoReverse); else { redraw(); render(); }
+      toast(`Loaded ${Object.keys(rec.reports).length} reports from ${gh.slug}.`, 'ok', 'GitHub');
+    } catch (e) { viewer.setHud(''); toast(e.message, 'err', 'GitHub'); }
+  }
+  async function setWeighting(w) { rec.weighting = w; await save(); rebuild(); render(); }
   async function setWeight(p, v) {
     rec.weights = { ...(rec.weights || {}) };
     if (v > 0) rec.weights[p.id] = v; else delete rec.weights[p.id];
@@ -545,6 +623,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
           if (taken.has(id)) continue;
           taken.add(id);
           if (isGround(it.mesh, it.k)) continue; // terrain / site pad: context, not something that gets built
+          if (PEOPLE.test(objectName(o, it.k))) continue; // scale figures placed in the model
           found.push({ key: it.mesh.userData.key, k: it.k });
         }
         if (pass === 0) for (const m of viewer.meshes({ visibleOnly: false })) if (!m.userData.objs && !m.userData.ground && displayName(m).toLowerCase().includes(q.toLowerCase()) && !taken.has(m.userData.key)) { taken.add(m.userData.key); found.push({ key: m.userData.key }); }
@@ -775,8 +854,9 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
             n ? btn('x', 'Clear mapping', () => unassign(p)) : null,
             btn('trash', 'Remove package from 4D', () => removePkgs([p.id], `“${p.name}”`))))),
       h('label', { class: 'p4-w' }, h('span', { class: 'dim2' }, 'Weight'),
-        h('input', { type: 'number', min: 0, step: 'any', placeholder: String(p.acts.length), value: rec.weights?.[p.id] ?? '', 'aria-label': `Weight of ${p.name}`, onchange: (e) => setWeight(p, +e.target.value) }),
-        h('span', { class: 'dim2' }, rec.weights?.[p.id] ? 'custom' : 'default = activity count')),
+        h('input', { type: 'number', min: 0, step: 'any', placeholder: model.weighting === 'value' ? String(Math.round(p.value || 0)) : String(p.acts.length), value: rec.weights?.[p.id] ?? '', 'aria-label': `Weight of ${p.name}`, onchange: (e) => setWeight(p, +e.target.value) }),
+        h('span', { class: 'dim2' }, rec.weights?.[p.id] ? 'custom' : model.weighting === 'value' ? 'default = contract value' : 'default = activity count'),
+        p.value ? h('span', { class: 'mono dim2 p4-val' }, rupiah(p.value)) : null),
       chartHost,
       acts);
   }
@@ -789,6 +869,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
           h('p', {}, 'Import the contractor’s Daily Activity Report PDFs (one per day). Progress per work package is read from the BQ table, then coloured on the 3D model and played day by day.')),
         h('button', { class: 'btn primary', style: { width: '100%' }, onclick: importFiles }, icon('upload'), 'Import daily report PDF / CSV'),
         h('button', { class: 'btn', style: { width: '100%' }, onclick: loadDemo }, icon('film'), 'Load demo: Seruni WF (simulated)'),
+        h('button', { class: 'btn ghost', style: { width: '100%' }, onclick: loadFromGitHub }, icon('download'), 'Load from GitHub'),
         h('button', { class: 'btn ghost', style: { width: '100%' }, onclick: downloadTemplate }, icon('download'), 'Download CSV templates'),
         h('p', { class: 'dim2', style: { margin: 0, fontSize: '12px' } }, 'Everything stays on this device. CSV columns: date, package, activity, unit, bq, progress (cumulative %), with optional area, package_id, hint, manpower and concern.'));
       return;
@@ -800,7 +881,7 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const stats = h('div', { class: 'stats p4-stats' },
       stat('act', 'Actual'), model.plan ? stat('plan', 'Planned') : null, model.plan ? stat('dev', 'Deviation') : null, stat('mp', 'Manpower'));
     const dl = h('b', {}), dayL = h('span', { class: 'dim2 mono' });
-    const slider = h('input', { type: 'range', class: 'p4-slider', min: 0, max: n - 1, step: 0.01, value: t, 'aria-label': 'Report day', oninput: (e) => { const v = +e.target.value; stop(); setT(v, { fromSlider: true }); } });
+    const slider = h('input', { type: 'range', class: 'p4-slider', min: 0, max: n - 1, step: 0.01, value: t, 'aria-label': 'Report day', oninput: (e) => { const v = +e.target.value; stop(); setT(v, { fromSlider: true }); e.target.value = v; } });
     const play$ = h('button', { class: 'btn primary icon', 'aria-label': 'Play', onclick: () => (playing ? stop() : play()) });
     const rec$ = h('button', { class: 'btn sm mag', onclick: playRecord }, h('span', { class: 'rec-dot' }), 'Play & record');
     const conc = h('div', { class: 'p4-conc' });
@@ -842,8 +923,11 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
     const chk = (label, key, on) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: opts[key], onchange: (e) => { opts[key] = e.target.checked; saveOpts(); on?.(); } }), label);
     const groups = ['OFFPLOT', 'ONPLOT', ''].map((a) => [a, model.pkgs.filter((p) => (p.area || '') === a && !p.summary)]).filter(([, l]) => l.length);
     const summ = model.pkgs.filter((p) => p.summary);
-    shell('4D progress', `${model.dates[0].slice(5)} → ${model.dates[n - 1].slice(5)} · ${n} report days · ${model.count} activities`,
+    shell('4D progress', `${model.dates[0].slice(5)} → ${model.dates[n - 1].slice(5)} · ${n} report days · ${model.count} activities${model.hasValue ? ` · ${rupiah(model.totalValue)}` : ''}`,
       stats,
+      model.hasValue ? h('div', { class: 'p4-wt' }, h('span', { class: 'dim2' }, 'Progress weighted by'),
+        h('div', { class: 'seg', role: 'group', 'aria-label': 'Progress weighting' }, [['count', 'Activities'], ['value', 'Contract value']].map(([v, l]) => h('button', { class: (rec.weighting || 'count') === v ? 'on' : '', 'aria-pressed': String((rec.weighting || 'count') === v), onclick: () => setWeighting(v) }, l)))) : null,
+      model.plan && rec.baselineSrc ? h('p', { class: 'dim2 p4-src' }, `Baseline: ${rec.baselineSrc}`) : null,
       h('div', { class: 'p4-when' }, dl, dayL),
       h('div', { class: 'p4-ctl' }, play$, h('div', { class: 'p4-track' }, issueMarks(), slider)),
       sCurve(),
@@ -874,11 +958,16 @@ export function createProgress4D({ viewer, project, shell, refresh, hasPanel }) 
       (rec.removed || []).length ? h('button', { class: 'btn sm ghost', onclick: restoreAll }, `Restore removed (${rec.removed.length})`) : null,
       summ.length ? h('details', { class: 'p4-grp' }, h('summary', { class: 'dim2' }, `Summary rows (${summ.length}), shown in the report but not counted in the overall %`), summ.map(pkgRow)) : null,
       conc,
+      h('div', { class: 'p4-sync' },
+        h('div', {}, h('b', {}, 'GitHub'), h('span', { class: 'dim2' }, rec.syncedAt ? `Saved ${fmt.date(String(rec.syncedAt).slice(0, 10))} · ${rec.syncPath || ''}` : 'Not saved yet. Save to use the same data on other devices.')),
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn sm', onclick: saveToGitHub }, icon('upload'), 'Save to GitHub'),
+          h('button', { class: 'btn sm ghost', onclick: loadFromGitHub }, icon('download'), 'Load from GitHub'))),
       h('div', { class: 'btn-row' },
         rec$,
-        h('button', { class: 'btn sm', onclick: importBaseline, 'data-tip': 'CSV: package, start, finish' }, icon('upload'), model.plan ? 'Replace baseline' : 'Import baseline (plan)'),
+        h('button', { class: 'btn sm', onclick: importBaseline, 'data-tip': 'Primavera P6 .xer, MS Project .xml or CSV (package, start, finish)' }, icon('upload'), model.plan ? 'Replace baseline' : 'Import baseline (plan)'),
         h('button', { class: 'btn sm', onclick: () => runAutoMap(false) }, icon('target'), 'Auto-map'),
-        h('button', { class: 'btn sm ghost', onclick: () => runAutoMap(!rec.autoReverse) }, 'Flip segment order'),
+        model.pkgs.some((p) => /^HDR-S\d+$/.test(p.id)) ? h('button', { class: 'btn sm ghost', onclick: () => runAutoMap(!rec.autoReverse) }, 'Flip segment order') : null,
         h('button', { class: 'btn sm', onclick: importFiles }, icon('upload'), 'Add reports'),
         h('button', { class: 'btn sm', onclick: exportXlsx }, icon('download'), 'XLSX'),
         h('button', { class: 'btn sm ghost', onclick: downloadTemplate }, icon('download'), 'CSV templates'),

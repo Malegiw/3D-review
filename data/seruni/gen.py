@@ -133,6 +133,26 @@ P = [
    ('Punch list & mechanical completion', 'ls', 1, '2027-02-05', '2027-02-26')]),
 ]
 
+import re as _re
+def rate(desc, unit):
+    # simulated unit rates (IDR), construction / installation only (no equipment supply)
+    s = desc.lower()
+    R = {
+      'm3': [('galian', 85e3), ('cut & fill', 120e3), ('lean', 1.25e6), ('base course', 450e3)], 'kg': [('pipe support', 32e3)],
+      'm2': [('clearing', 12e3), ('bekisting', 285e3), ('bottom plate', 950e3), ('roof plate', 950e3), ('coating', 210e3), ('waterproofing', 160e3), ('grating', 1.35e6), ('dinding', 165e3), ('atap', 420e3), ('paving', 210e3)],
+      'titik': [('mini pile', 4.5e6), ('pipe support', 2.8e6), ('lampu', 3.2e6)],
+      'set': [('anchor', 1.8e6), ('nozzle', 6.5e6), ('hook-up', 6.5e6), ('instrument', 6.5e6), ('pipe support', 1.65e6), ('sleeper', 1.65e6), ('grounding', 185e6)],
+      'ton': [('fabrikasi plat', 38e6), ('fabrikasi surge', 42e6), ('erection surge', 15e6), ('fabrikasi struktur', 36e6), ('erection water', 12e6), ('fabrikasi steel', 32e6), ('erection steel', 11e6)],
+      'ls': [('mobilisasi', 850e6), ('survey', 95e6), ('site office', 380e6), ('hydrotest tank', 225e6), ('shutdown', 450e6), ('mep', 350e6), ('punch', 250e6), ('hydrotest & coating', 280e6)],
+      'unit': [('setting pompa', 85e6), ('pump', 85e6), ('grouting', 18e6), ('transformer', 180e6), ('vessel', 120e6), ('filter', 95e6), ('safety shower', 45e6), ('apar', 3.5e6)],
+      'm': [('stringing', 95e3), ('u-ditch', 1.15e6), ('erection pipa', 425e3), ('modifikasi', 650e3), ('cable tray', 850e3), ('kabel', 210e3), ('handrail', 650e3)],
+      'joint': [('welding', 2.65e6), ('ndt', 1.15e6), ('coating', 850e3)], 'dia-inch': [('fabrikasi', 385e3), ('welding', 520e3)],
+      'course': [('', 165e6)], 'film': [('', 450e3)], 'km': [('', 280e6)], 'nos': [('', 165e6)], 'section': [('', 175e6)], 'pts': [('', 145e6)], 'test pack': [('', 22e6)], 'system': [('', 48e6)],
+    }
+    for k, v in R.get(unit, []):
+        if k in s: return int(v)
+    return int({'m3': 1.85e6, 'kg': 18.5e3, 'm2': 250e3, 'ton': 30e6, 'set': 5e6, 'unit': 60e6, 'ls': 200e6, 'm': 400e3}.get(unit, 1e6))
+
 def smooth(x):
     x = max(0.0, min(1.0, x))
     return x * x * (3 - 2 * x)
@@ -167,7 +187,7 @@ for di, day in enumerate(days):
             v = round(v, 1)
             cur[k] = v
             if prev < v < 100 or (0 < v and prev < 100 and v >= 100): active += 1
-            rows.append([day.isoformat(), area, name, pid, hint, desc, unit, bq, v])
+            rows.append([day.isoformat(), area, name, pid, hint, desc, unit, bq, rate(desc, unit), v])
     mp = int(round((22 + active * 4.2) * (0.62 if sun else 1.0) * (0.85 if day in rain else 1.0) * random.uniform(0.93, 1.07)))
     for r in rows[-sum(len(p[5]) for p in P):]: r.append(mp)
     concerns = []
@@ -181,7 +201,7 @@ for di, day in enumerate(days):
     day_rows = rows[-sum(len(p[5]) for p in P):]
     for i, c in enumerate(concerns): day_rows[i].append(c)
 
-hdr = ['date', 'area', 'package', 'package_id', 'hint', 'activity', 'unit', 'bq', 'progress', 'manpower', 'concern']
+hdr = ['date', 'area', 'package', 'package_id', 'hint', 'activity', 'unit', 'bq', 'rate', 'progress', 'manpower', 'concern']
 with open(__import__('os').path.join(__import__('os').path.dirname(__import__('os').path.abspath(__file__)), 'Seruni_WF_daily_report_SIMULASI.csv'), 'w', newline='') as f:
     w = csv.writer(f); w.writerow(hdr)
     for r in rows: w.writerow(r + [''] * (len(hdr) - len(r)))
@@ -193,3 +213,43 @@ print(len(rows), 'rows', len(days), 'days')
 # overall at today
 tot = sum(len(p[5]) for p in P)
 print('last report', last_day, 'overall %.1f' % (sum(cur.values()) / tot))
+
+# contract value
+tv = sum(a[2] * rate(a[0], a[1]) for p in P for a in p[5])
+print('contract value (simulated) Rp %.1f M' % (tv / 1e9))
+for pid, area, name, hint, delay, acts in P:
+    print('  %-10s Rp %6.2f M' % (pid, sum(a[2] * rate(a[0], a[1]) for a in acts) / 1e9))
+
+# baseline schedules: Primavera P6 (XER) and Microsoft Project (XML), activity level, WBS = work package
+import os, html as _html
+here = os.path.dirname(os.path.abspath(__file__))
+xer = ['ERMHDR\t19.12\t2026-08-25\tProject\tadmin\tSIMULASI\tdbxDatabaseNoName\tProject Management\tIDR',
+       '%T\tPROJECT', '%F\tproj_id\tproj_short_name\tplan_start_date\tplan_end_date',
+       '%R\t1001\tSRN-WF\t2026-09-01 08:00\t2027-02-26 17:00',
+       '%T\tPROJWBS', '%F\twbs_id\tproj_id\tparent_wbs_id\twbs_short_name\twbs_name',
+       '%R\t2000\t1001\t\tSRN-WF\tSeruni Waterflood (SIMULASI)']
+for i, (pid, area, name, hint, delay, acts) in enumerate(P):
+    xer.append(f'%R\t{2001 + i}\t1001\t2000\t{pid}\t{name}')
+xer += ['%T\tTASK', '%F\ttask_id\tproj_id\twbs_id\ttask_code\ttask_name\ttask_type\ttarget_start_date\ttarget_end_date']
+tid = 5000
+for i, (pid, area, name, hint, delay, acts) in enumerate(P):
+    for j, (desc, unit, bq, a, z) in enumerate(acts):
+        tid += 1
+        xer.append(f'%R\t{tid}\t1001\t{2001 + i}\t{pid}-{(j + 1) * 10:03d}\t{desc}\tTT_Task\t{a} 08:00\t{z} 17:00')
+xer.append('%E')
+open(os.path.join(here, 'Seruni_WF_baseline_SIMULASI.xer'), 'w').write('\n'.join(xer) + '\n')
+
+T = []
+uid = 0
+T.append('<Task><UID>0</UID><ID>0</ID><Name>Seruni Waterflood (SIMULASI)</Name><OutlineLevel>0</OutlineLevel><Summary>1</Summary><Start>2026-09-01T08:00:00</Start><Finish>2027-02-26T17:00:00</Finish></Task>')
+for i, (pid, area, name, hint, delay, acts) in enumerate(P):
+    uid += 1
+    T.append(f'<Task><UID>{uid}</UID><ID>{uid}</ID><Name>{_html.escape(name)}</Name><WBS>{i + 1}</WBS><OutlineLevel>1</OutlineLevel><Summary>1</Summary><Start>{min(a[3] for a in acts)}T08:00:00</Start><Finish>{max(a[4] for a in acts)}T17:00:00</Finish></Task>')
+    for j, (desc, unit, bq, a, z) in enumerate(acts):
+        uid += 1
+        T.append(f'<Task><UID>{uid}</UID><ID>{uid}</ID><Name>{_html.escape(desc)}</Name><WBS>{i + 1}.{j + 1}</WBS><OutlineLevel>2</OutlineLevel><Summary>0</Summary><Start>{a}T08:00:00</Start><Finish>{z}T17:00:00</Finish></Task>')
+xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Project xmlns="http://schemas.microsoft.com/project">'
+       '<Name>Seruni Waterflood (SIMULASI)</Name><StartDate>2026-09-01T08:00:00</StartDate><FinishDate>2027-02-26T17:00:00</FinishDate><Tasks>\n'
+       + '\n'.join(T) + '\n</Tasks></Project>\n')
+open(os.path.join(here, 'Seruni_WF_baseline_SIMULASI.xml'), 'w').write(xml)
+print('xer/xml written', tid - 5000, 'activities')

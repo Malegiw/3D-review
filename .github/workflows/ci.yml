@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches-ignore: [gh-pages]
+    paths-ignore: ['models/**', 'converted/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npx vite build
+      - name: Install browser
+        run: npm i --no-save playwright@1.49.1 && npx playwright install --with-deps chromium
+      - name: Browser smoke test (4D demo, weekly and monthly report)
+        run: |
+          npx vite preview --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4173/ > /dev/null && break; sleep 1; done
+          node scripts/smoke.mjs

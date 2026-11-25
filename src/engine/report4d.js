@@ -5,7 +5,7 @@ import { DONE_AT, planAt } from './progress4d.js';
 
 const T = {
   id: {
-    week: { title: 'Laporan progres mingguan', unit: 'Minggu ke', gain: 'Kenaikan minggu ini', delta: 'Δ minggu', acts: 'Pekerjaan yang maju minggu ini', issues: 'Isu dan kendala minggu ini', nothing: 'Tidak ada pekerjaan yang maju minggu ini.', look: 'Look-ahead 2 minggu', cal: 'Kenaikan progres per hari' },
+    week: { title: 'Laporan progres mingguan', unit: 'Minggu ke-', gain: 'Kenaikan minggu ini', delta: 'Δ minggu', acts: 'Pekerjaan yang maju minggu ini', issues: 'Isu dan kendala minggu ini', nothing: 'Tidak ada pekerjaan yang maju minggu ini.', look: 'Look-ahead 2 minggu', cal: 'Kenaikan progres per hari' },
     month: { title: 'Laporan progres bulanan', unit: 'Bulan', gain: 'Kenaikan bulan ini', delta: 'Δ bulan', acts: 'Pekerjaan yang maju bulan ini', issues: 'Isu dan kendala bulan ini', nothing: 'Tidak ada pekerjaan yang maju bulan ini.', look: 'Look-ahead 4 minggu', cal: 'Kalender kenaikan progres harian' },
     period: 'Periode', to: 's/d', reportDate: 'Tanggal laporan', projWeek: 'Minggu proyek', days: 'hari lapor',
     actual: 'Progres aktual', plan: 'Progres rencana', dev: 'Deviasi', spi: 'SPI',
@@ -20,11 +20,12 @@ const T = {
     sim: 'Data simulasi, bukan laporan kontraktor', gen: 'Dibuat dengan Review 3D',
     lookNoPlan: 'Belum ada baseline, jadi look-ahead memakai laju rata-rata 2 minggu terakhir.',
     forecast: 'Perkiraan selesai', onTrend: 'laju 4 minggu terakhir', onSpi: 'durasi rencana dibagi SPI',
+    wValue: (v) => `Progres dibobot nilai kontrak (volume BQ × harga satuan), total ${v}.`, wCount: 'Progres dibobot jumlah aktivitas per paket.', blSrc: 'Baseline',
     print: 'Simpan sebagai PDF lewat menu Cetak', printBtn: 'Cetak atau simpan PDF', dow: ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'],
     months: ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'],
   },
   en: {
-    week: { title: 'Weekly progress report', unit: 'Week', gain: 'Gained this week', delta: 'Δ week', acts: 'Work progressed this week', issues: 'Issues this week', nothing: 'No work progressed this week.', look: '2-week look-ahead', cal: 'Progress gained per day' },
+    week: { title: 'Weekly progress report', unit: 'Week ', gain: 'Gained this week', delta: 'Δ week', acts: 'Work progressed this week', issues: 'Issues this week', nothing: 'No work progressed this week.', look: '2-week look-ahead', cal: 'Progress gained per day' },
     month: { title: 'Monthly progress report', unit: 'Month', gain: 'Gained this month', delta: 'Δ month', acts: 'Work progressed this month', issues: 'Issues this month', nothing: 'No work progressed this month.', look: '4-week look-ahead', cal: 'Daily progress calendar' },
     period: 'Period', to: 'to', reportDate: 'Report date', projWeek: 'Project week', days: 'report days',
     actual: 'Actual progress', plan: 'Planned progress', dev: 'Deviation', spi: 'SPI',
@@ -39,6 +40,7 @@ const T = {
     sim: 'Simulated data, not a contractor report', gen: 'Generated with Review 3D',
     lookNoPlan: 'No baseline yet, so the look-ahead uses the average rate of the last 2 weeks.',
     forecast: 'Forecast finish', onTrend: 'rate of the last 4 weeks', onSpi: 'planned duration divided by SPI',
+    wValue: (v) => `Progress weighted by contract value (BQ quantity × unit rate), total ${v}.`, wCount: 'Progress weighted by the number of activities per package.', blSrc: 'Baseline',
     print: 'Save as PDF from the Print menu', printBtn: 'Print or save PDF', dow: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
   },
@@ -183,12 +185,13 @@ function calendarHtml(f, L) {
 <div class="legend"><span><i style="background:rgba(15,118,110,.22)"></i>${esc(L.low)}</span><span><i style="background:#0f766e"></i>${esc(L.high)} (+${max.toFixed(1)}%)</span><span><i style="background:#f3f5f5;outline:1px solid #e0e5e5"></i>${esc(L.noReport)}</span><span><i class="dot"></i>${esc(L.issueDot)}</span></div>`;
 }
 
+const rp = (v) => (v >= 1e9 ? `Rp ${(v / 1e9).toLocaleString('id-ID', { maximumFractionDigits: 2 })} M` : `Rp ${Math.round(v / 1e6).toLocaleString('id-ID')} jt`);
 const fmtPct = (v) => (v == null ? '·' : `${(Math.round(v * 10) / 10).toFixed(1)}%`);
 const fmtDev = (v) => (v == null ? '·' : `${v > 0 ? '+' : ''}${(Math.round(v * 10) / 10).toFixed(1)}%`);
 const fmtQty = (v) => (Math.abs(v) >= 100 ? Math.round(v).toLocaleString('id-ID') : (Math.round(v * 10) / 10).toLocaleString('id-ID'));
 
 /** Self-contained printable HTML. opts: { kind: 'week'|'month', project, lang, simulated, images: [{src, caption}], dateFmt(iso) } */
-export function reportHtml(model, di, { kind = 'week', project = '', lang = 'id', simulated = false, images = [], dateFmt = (d) => d } = {}) {
+export function reportHtml(model, di, { kind = 'week', project = '', lang = 'id', simulated = false, images = [], dateFmt = (d) => d, baselineSrc = '' } = {}) {
   const L = T[lang] || T.id, K = L[kind] || L.week;
   const f = periodFacts(model, di, kind);
   const st = { done: L.stDone, ahead: L.stAhead, on: L.stOn, behind: L.stBehind, todo: L.stTodo, wip: L.stWip };
@@ -197,7 +200,7 @@ export function reportHtml(model, di, { kind = 'week', project = '', lang = 'id'
   const kpi = (label, value, sub = '', cls = '') => `<div class="kpi ${cls}"><small>${esc(label)}</small><b>${value}</b><span>${sub}</span></div>`;
   const devCls = f.dev == null ? '' : f.dev < -1 ? 'bad' : f.dev > 1 ? 'good' : '';
   const groups = ['ONPLOT', 'OFFPLOT', ''].map((a) => [a, f.pkgs.filter((p) => (p.area || '') === a)]).filter(([, l]) => l.length);
-  const label = kind === 'month' ? `${L.months[f.month]} ${f.year}` : `${K.unit} ${f.week}`;
+  const label = kind === 'month' ? `${L.months[f.month]} ${f.year}` : `${K.unit}${f.week}`;
   const maxActs = kind === 'month' ? 24 : 18;
   const range = (a, b) => `${esc(dateFmt(a))} ${esc(L.to)} ${esc(dateFmt(b))}`;
   return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="utf-8"><title>${esc(K.title)} · ${esc(project)} · ${esc(label)}</title>
@@ -267,7 +270,7 @@ ${kpi(L.plan, fmtPct(f.plan), f.plan == null ? L.noPlan : '')}
 ${kpi(L.dev, fmtDev(f.dev), f.spi != null ? `${L.spi} ${f.spi.toFixed(2)}` : '', devCls)}
 ${kpi(L.manpower, f.mpAvg != null ? `${f.mpAvg}` : '·', f.mpAvg != null ? `${L.avg}, ${L.peak} ${f.mpPeak} ${L.people}` : '')}
 </div>
-<p class="note">${f.forecast ? `${esc(L.forecast)}: <b>${esc(dateFmt(f.forecast))}</b> (${esc(f.basis === 'spi' ? L.onSpi : L.onTrend)})${f.planFinish ? `. ${esc(L.planLine)}: ${esc(dateFmt(f.planFinish))}` : ''}.` : ''}</p>
+<p class="note">${f.forecast ? `${esc(L.forecast)}: <b>${esc(dateFmt(f.forecast))}</b> (${esc(f.basis === 'spi' ? L.onSpi : L.onTrend)})${f.planFinish ? `. ${esc(L.planLine)}: ${esc(dateFmt(f.planFinish))}` : ''}. ` : ''}${esc(model.weighting === 'value' ? L.wValue(rp(model.totalValue)) : L.wCount)}${baselineSrc ? ` ${esc(L.blSrc)}: ${esc(baselineSrc)}.` : ''}</p>
 <h2>${esc(L.sCurve)}</h2>
 ${sCurveSvg(model, f.di, L)}
 ${images.length ? `<h2>${esc(L.model)}</h2><div class="shots">${images.map((im) => `<figure><img src="${im.src}" alt=""><figcaption>${esc(im.caption || '')}</figcaption></figure>`).join('')}</div>` : ''}

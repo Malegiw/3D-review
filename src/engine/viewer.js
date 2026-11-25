@@ -170,7 +170,9 @@ export class Viewer {
   _loop(ts) {
     this._raf = requestAnimationFrame(this._loop);
     this._timer.update(ts);
-    const dt = Math.min(this._timer.getDelta(), 0.1);
+    const raw = this._timer.getDelta(), dt = Math.min(raw, 0.1);
+    if (this.tickers.size && !this._rec) this._adapt(raw);
+    else if (!this.tickers.size && this._ad && this.renderer.getPixelRatio() < this._ad.max) { this.renderer.setPixelRatio(this._ad.max); this.resize(); this._dirty = true; } // full sharpness when still
     if (this.tickers.size) {
       for (const fn of [...this.tickers]) { if (fn(dt) === false) this.tickers.delete(fn); }
       this._dirty = true;
@@ -189,6 +191,20 @@ export class Viewer {
         try { R.overlay(ctx, c.width, c.height, this.renderer.getPixelRatio()); } catch (e) { console.warn(e); }
       }
     }
+  }
+  // Adaptive resolution while something animates (4D playback, tours): heavy models on phones drop the pixel ratio
+  // step by step to keep motion smooth, and get it back when frames are fast again. Never while recording.
+  _adapt(dt) {
+    const a = (this._ad ||= { n: 0, sum: 0, max: Math.min(window.devicePixelRatio || 1, 2) });
+    if (dt <= 0 || dt > 0.5) return;
+    a.n++; a.sum += dt;
+    if (a.n < 24) return;
+    const avg = a.sum / a.n, pr = this.renderer.getPixelRatio();
+    a.n = 0; a.sum = 0;
+    let next = pr;
+    if (avg > 1 / 26 && pr > 0.75) next = Math.max(0.75, pr - 0.25);
+    else if (avg < 1 / 50 && pr < a.max) next = Math.min(a.max, pr + 0.25);
+    if (next !== pr) { this.renderer.setPixelRatio(next); this.resize(); }
   }
   addTicker(fn) { this.tickers.add(fn); this.requestRender(); return () => this.tickers.delete(fn); }
 
@@ -664,6 +680,7 @@ export class Viewer {
   }
 
   startRecording(fps = 30, { overlay = null } = {}) {
+    if (this._ad && this.renderer.getPixelRatio() < this._ad.max) { this.renderer.setPixelRatio(this._ad.max); this.resize(); } // record at full resolution
     const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
     const mime = types.find((t) => window.MediaRecorder?.isTypeSupported?.(t));
     if (!mime) throw new Error('This browser cannot record video (MediaRecorder unsupported).');

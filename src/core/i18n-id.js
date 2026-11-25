@@ -700,12 +700,39 @@ const E = {
   'Weekly report opened. Use Print to save it as PDF.': 'Laporan mingguan dibuka. Pakai Cetak untuk menyimpannya sebagai PDF.',
   'Two templates downloaded: daily report (one row per activity per day; progress is cumulative %) and baseline (package, start, finish). The hint column lists object or layer names for Auto-map, separated by |.': 'Dua template diunduh: laporan harian (satu baris per aktivitas per hari; progress = % kumulatif) dan baseline (package, start, finish). Kolom hint berisi nama objek atau layer untuk Auto-map, dipisah dengan |.',
   'SPI ·': 'SPI ·',
+  'Progress weighted by': 'Progres dibobot',
+  'Activities': 'Jumlah aktivitas',
+  'Contract value': 'Nilai kontrak',
+  'default = contract value': 'default = nilai kontrak',
+  'Primavera P6 .xer, MS Project .xml or CSV (package, start, finish)': 'Primavera P6 .xer, MS Project .xml, atau CSV (package, start, finish)',
+  'Progress weighting': 'Pembobotan progres',
+  'Load from GitHub': 'Muat dari GitHub',
+  'Save to GitHub': 'Simpan ke GitHub',
+  'Not saved yet. Save to use the same data on other devices.': 'Belum disimpan. Simpan agar data yang sama bisa dipakai di perangkat lain.',
+  'Connect GitHub first: Settings, then Converter (repository and token). The 4D data is stored in that repository.': 'Hubungkan GitHub dulu: Pengaturan, lalu Converter (repository dan token). Data 4D disimpan di repository itu.',
+  'Save 4D data to GitHub': 'Simpan data 4D ke GitHub',
+  'Save to public repository': 'Simpan ke repository publik',
+  'Saving 4D data to GitHub': 'Menyimpan data 4D ke GitHub',
+  'Load 4D data from GitHub': 'Muat data 4D dari GitHub',
+  'Loading 4D data from GitHub': 'Memuat data 4D dari GitHub',
+  'Load 4D data': 'Muat data 4D',
+  'Replace': 'Ganti',
+  'This file is not 4D data saved by Review 3D.': 'File ini bukan data 4D yang disimpan oleh Review 3D.',
 };
 
 export const EXACT = new Map(Object.entries(E));
 
 /** Patterns for sentences built from data. First match wins. */
 export const RULES = [
+  [/^Saved (.+) · (data\/4d\/.+)$/, 'Disimpan $1 · $2'],
+  [/^(.+) is a public repository, so anyone with the link can read the 4D data \(reports, baseline, weights\)\. Save it there anyway\?$/, '$1 adalah repository publik, jadi siapa pun yang punya tautannya bisa membaca data 4D (laporan, baseline, bobot). Tetap simpan di sana?'],
+  [/^Saved to (.+) \((\d+) KB\)\. Open this project on another device and use Load from GitHub\.$/, 'Tersimpan di $1 ($2 KB). Buka proyek ini di perangkat lain lalu pakai Muat dari GitHub.'],
+  [/^No 4D data in (.+) yet\. Save it from the device that has the reports\.$/, 'Belum ada data 4D di $1. Simpan dulu dari perangkat yang punya laporannya.'],
+  [/^Replace the 4D data on this device with (.+) \(saved (.+)\)\?$/, 'Ganti data 4D di perangkat ini dengan $1 (disimpan $2)?'],
+  [/^Loaded (\d+) reports from (.+)\.$/, '$1 laporan dimuat dari $2.'],
+  [/^(.+): (\d+) packages and (\d+) of (\d+) activities matched\.$/, '$1: $2 paket dan $3 dari $4 aktivitas cocok.'],
+  [/^No package or activity in (.+) matched the daily reports\. Activity names or WBS names must match the report\.$/, 'Tidak ada paket atau aktivitas di $1 yang cocok dengan laporan harian. Nama aktivitas atau WBS harus sama dengan laporan.'],
+  [/^Baseline: (.+)$/, 'Baseline: $1'],
   [/^Progress (.+) · day (\d+)\/(\d+)$/, 'Progres $1 · hari $2/$3'],
   [/^\+(.+)% in 7 days$/, '+$1% dalam 7 hari'],
   [/^(\d+) pkgs with baseline$/, '$1 paket ber-baseline'],
@@ -715,7 +742,7 @@ export const RULES = [
   [/^(.+) · no report$/, '$1 · tanpa laporan'],
   [/^Summary rows \((\d+)\), shown in the report but not counted in the overall %$/, 'Baris ringkasan ($1), tampil di laporan tapi tidak dihitung di progres keseluruhan'],
   // 4D progress
-  [/^(.+) → (.+) · (\d+) report days · (\d+) activities$/, '$1 → $2 · $3 hari laporan · $4 aktivitas'],
+  [/^(.+) → (.+) · (\d+) report days · (\d+) activities(.*)$/, '$1 → $2 · $3 hari laporan · $4 aktivitas$5'],
   [/^(\d+) people on site · day (\d+)\/(\d+)$/, '$1 orang di lokasi · hari $2/$3'],
   [/^day (\d+)\/(\d+)$/, 'hari $1/$2'],
   [/^Plan (.+) · actual (.+) · (on plan|ahead (.+)|behind (.+)) \((\d+) pkgs with baseline\)$/, (pl, ac, st, a, b, n) => `Rencana ${pl} · aktual ${ac} · ${st === 'on plan' ? 'sesuai rencana' : a ? `lebih cepat ${a}` : `terlambat ${b}`} (${n} paket ber-baseline)`],
