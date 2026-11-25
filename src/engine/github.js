@@ -10,7 +10,7 @@ export const MAX_UPLOAD = 75 * 1024 * 1024; // contents API practical ceiling (G
 
 const encPath = (p) => p.split('/').map(encodeURIComponent).join('/');
 
-function toBase64(bytes) {
+export function toBase64(bytes) {
   let s = '';
   const CH = 0x8000;
   for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));

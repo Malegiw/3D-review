@@ -22,7 +22,11 @@ export const DONE_AT = 99.5; // % at which a package counts as complete
  * so a row that is new today, in a package where a row went missing and reads alike (≥ 55 % shared words), continues
  * that activity. Before its first report an activity counts 0 %; after its last report it keeps its last value.
  */
-export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
+function setValue(a, r) {
+  const amt = Number(r.amount), rate = Number(r.rate);
+  if (amt > 0) a.v = amt; else if (rate > 0 && Number(r.bq) > 0) a.v = rate * Number(r.bq);
+}
+export function buildModel(reports, { weights = {}, baseline = {}, weighting = 'count' } = {}) {
   const dates = Object.keys(reports || {}).sort();
   const pkgs = new Map();
   const byKey = new Map();
@@ -41,7 +45,7 @@ export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
       occ.set(base, n + 1);
       const key = `${base}#${n}`;
       const a = byKey.get(key);
-      if (a) { a.raw[di] = r.pct; a.last = di; a.bq = r.bq; a.unit = r.unit || a.unit; seen.add(a); } else fresh.push({ r, key, p });
+      if (a) { a.raw[di] = r.pct; a.last = di; a.bq = r.bq; a.unit = r.unit || a.unit; setValue(a, r); seen.add(a); } else fresh.push({ r, key, p });
     }
     for (const f of fresh) {
       const label = f.r.sub ? `${f.r.sub} · ${f.r.desc}` : f.r.desc;
@@ -58,7 +62,7 @@ export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
         f.p.acts.push(a);
       }
       byKey.set(f.key, a);
-      a.raw[di] = f.r.pct; a.last = di; a.bq = f.r.bq; a.unit = f.r.unit || a.unit;
+      a.raw[di] = f.r.pct; a.last = di; a.bq = f.r.bq; a.unit = f.r.unit || a.unit; setValue(a, f.r);
       seen.add(a);
     }
   });
@@ -70,12 +74,21 @@ export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
       for (let i = 0; i < D; i++) { if (a.raw[i] != null) v = a.raw[i]; a.pct[i] = i < a.first ? 0 : v; }
       a.dropped = a.last < D - 1;
     }
+  }
+  // weighting: 'value' = contract value (BQ × unit rate, or the amount column) when the reports carry it, else activity count
+  const hasValue = [...pkgs.values()].some((p) => p.acts.some((a) => a.v > 0));
+  const byValue = weighting === 'value' && hasValue;
+  for (const p of pkgs.values()) {
+    const vs = p.acts.map((a) => (byValue ? (a.v > 0 ? a.v : 0) : 1));
+    const vt = vs.reduce((s, v) => s + v, 0);
+    p.value = p.acts.reduce((s, a) => s + (a.v > 0 ? a.v : 0), 0);
     p.curve = new Float32Array(D);
-    for (let i = 0; i < D; i++) p.curve[i] = p.acts.length ? p.acts.reduce((s, a) => s + a.pct[i], 0) / p.acts.length : 0;
+    for (let i = 0; i < D; i++) p.curve[i] = vt ? p.acts.reduce((s, a, k) => s + a.pct[i] * vs[k], 0) / vt : (p.acts.length ? p.acts.reduce((s, a) => s + a.pct[i], 0) / p.acts.length : 0);
+    p.vs = vs; p.vt = vt;
   }
   const real = [...pkgs.values()].filter((p) => !p.summary);
-  // package weight: user value if given, otherwise the number of activities (= plain activity average)
-  for (const p of real) p.w = Number(weights[p.id]) > 0 ? Number(weights[p.id]) : p.acts.length;
+  // package weight: user value if given, otherwise its contract value (value mode) or its number of activities
+  for (const p of real) p.w = Number(weights[p.id]) > 0 ? Number(weights[p.id]) : byValue ? p.value || 0 : p.acts.length;
   const total = real.reduce((n, p) => n + p.w, 0) || 1;
   const overall = new Float32Array(D);
   for (let i = 0; i < D; i++) overall[i] = real.reduce((s, p) => s + p.curve[i] * p.w, 0) / total;
@@ -84,9 +97,17 @@ export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
   const withPlan = real.filter((p) => baseline[p.id]?.start && baseline[p.id]?.finish);
   if (withPlan.length) {
     for (const p of withPlan) {
-      const a = Date.parse(baseline[p.id].start), z = Date.parse(baseline[p.id].finish);
-      p.plan = Float32Array.from(dates, (d) => planAt(Date.parse(d), a, z));
-      p.bl = { start: baseline[p.id].start, finish: baseline[p.id].finish };
+      const b = baseline[p.id], a = Date.parse(b.start), z = Date.parse(b.finish);
+      p.bl = { start: b.start, finish: b.finish };
+      // activity-level baseline (from a P6 / MS Project schedule): each activity follows its own dates, the package
+      // plan is their weighted mean; activities without a match follow the package window
+      const byKey = new Map((b.acts || []).map((x) => [x.key, x]));
+      if (byKey.size) {
+        for (const act of p.acts) { const x = byKey.get(act.key); if (x) act.bl = { start: x.start, finish: x.finish, name: x.name }; }
+        const curves = p.acts.map((act) => { const s0 = Date.parse(act.bl?.start || b.start), s1 = Date.parse(act.bl?.finish || b.finish); return (d) => planAt(d, s0, s1); });
+        p.plan = Float32Array.from(dates, (d) => { const t = Date.parse(d); return p.vt ? p.acts.reduce((s, act, k) => s + curves[k](t) * p.vs[k], 0) / p.vt : planAt(t, a, z); });
+        p.bl.acts = byKey.size;
+      } else p.plan = Float32Array.from(dates, (d) => planAt(Date.parse(d), a, z));
     }
     const wt = withPlan.reduce((n, p) => n + p.w, 0) || 1;
     plan = new Float32Array(D);
@@ -97,7 +118,7 @@ export function buildModel(reports, { weights = {}, baseline = {} } = {}) {
     plan.covered = withPlan.length;
   }
   const manpower = dates.map((d) => reports[d].manpower?.today ?? null);
-  return { dates, pkgs: [...pkgs.values()], overall, plan, manpower, count: real.reduce((n, p) => n + p.acts.length, 0), concerns: Object.fromEntries(dates.map((d) => [d, reports[d].concerns || []])) };
+  return { dates, pkgs: [...pkgs.values()], overall, plan, manpower, weighting: byValue ? 'value' : 'count', hasValue, totalValue: real.reduce((s, p) => s + (p.value || 0), 0), count: real.reduce((n, p) => n + p.acts.length, 0), concerns: Object.fromEntries(dates.map((d) => [d, reports[d].concerns || []])) };
 }
 
 /** Progress (%) of a package at fractional day index t (0 … dates-1), interpolated between report days. */
@@ -154,7 +175,7 @@ export function toLong(model) {
   const rows = [];
   for (const p of model.pkgs) for (const a of p.acts) model.dates.forEach((d, i) => {
     if (a.raw[i] == null) return;
-    rows.push({ date: d, area: p.area, package: p.name, package_id: p.id, activity: a.desc, unit: a.unit, bq: a.bq, progress: Math.round(a.raw[i] * 10) / 10 });
+    rows.push({ date: d, area: p.area, package: p.name, package_id: p.id, activity: a.desc, unit: a.unit, bq: a.bq, progress: Math.round(a.raw[i] * 10) / 10, ...(a.v ? { amount: Math.round(a.v) } : {}) });
   });
   return rows;
 }
@@ -185,6 +206,8 @@ export function reportsFromCSV(text) {
     const id = (r.package_id || name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '')).slice(0, 24);
     (reports[date] ||= { rows: [], concerns: [] }).rows.push({
       pkg: id, pkgName: name, area: (r.area || '').toUpperCase(), hint: r.hint || r.map || '', summary: false, sub: '', desc, unit: r.unit || '', bq: numFlex(r.bq ?? r.volume) || 0, pct: Math.min(100, Math.max(0, pct)),
+      ...(numFlex(r.rate ?? r.unit_price ?? r.harga ?? r.harga_satuan) > 0 ? { rate: numFlex(r.rate ?? r.unit_price ?? r.harga ?? r.harga_satuan) } : {}),
+      ...(numFlex(r.amount ?? r.nilai ?? r.value) > 0 ? { amount: numFlex(r.amount ?? r.nilai ?? r.value) } : {}),
     });
     const mp = numFlex(r.manpower);
     if (Number.isFinite(mp)) reports[date].manpower = { today: mp };
@@ -198,7 +221,7 @@ export function buildProgressXlsx(model, { project = '' } = {}) {
   const ds = model.dates;
   const dcols = ds.map((d, i) => ({ header: d.slice(5), key: `d${i}`, width: 8, type: 'n', dp: 1 }));
   const pk = model.pkgs.map((p) => ({ package: p.name, area: p.area, acts: p.acts.length, ...Object.fromEntries(ds.map((_, i) => [`d${i}`, p.curve[i]])) }));
-  pk.push({ package: 'OVERALL (activity-weighted, excl. summaries)', area: '', acts: model.count, ...Object.fromEntries(ds.map((_, i) => [`d${i}`, model.overall[i]])) });
+  pk.push({ package: model.weighting === 'value' ? 'OVERALL (contract-value weighted, excl. summaries)' : 'OVERALL (package-weighted, excl. summaries)', area: '', acts: model.count, ...Object.fromEntries(ds.map((_, i) => [`d${i}`, model.overall[i]])) });
   if (model.plan) pk.push({ package: `PLAN (baseline, ${model.plan.covered} packages)`, area: '', acts: '', ...Object.fromEntries(ds.map((_, i) => [`d${i}`, model.plan[i]])) });
   pk.push({ package: 'Manpower (people on site)', area: '', acts: '', ...Object.fromEntries(ds.map((_, i) => [`d${i}`, model.manpower[i] ?? ''])) });
   const act = [];
@@ -206,7 +229,7 @@ export function buildProgressXlsx(model, { project = '' } = {}) {
   return buildXlsx([
     { name: 'Packages', title: project ? `${project} — progress per work package (%)` : undefined, columns: [{ header: 'Work package', key: 'package', width: 44 }, { header: 'Area', key: 'area', width: 10 }, { header: 'Activities', key: 'acts', width: 10, type: 'n', dp: 0 }, ...dcols], rows: pk },
     { name: 'Activities', columns: [{ header: 'Work package', key: 'package', width: 34 }, { header: 'Activity', key: 'activity', width: 56 }, { header: 'Unit', key: 'unit', width: 8 }, { header: 'BQ', key: 'bq', width: 10, type: 'n', dp: 2 }, ...dcols], rows: act },
-    { name: 'Long', columns: [{ header: 'date', key: 'date', width: 12 }, { header: 'area', key: 'area', width: 9 }, { header: 'package', key: 'package', width: 34 }, { header: 'package_id', key: 'package_id', width: 12 }, { header: 'activity', key: 'activity', width: 56 }, { header: 'unit', key: 'unit', width: 8 }, { header: 'bq', key: 'bq', width: 10, type: 'n', dp: 2 }, { header: 'progress', key: 'progress', width: 9, type: 'n', dp: 1 }], rows: toLong(model) },
+    { name: 'Long', columns: [{ header: 'date', key: 'date', width: 12 }, { header: 'area', key: 'area', width: 9 }, { header: 'package', key: 'package', width: 34 }, { header: 'package_id', key: 'package_id', width: 12 }, { header: 'activity', key: 'activity', width: 56 }, { header: 'unit', key: 'unit', width: 8 }, { header: 'bq', key: 'bq', width: 10, type: 'n', dp: 2 }, { header: 'progress', key: 'progress', width: 9, type: 'n', dp: 1 }, { header: 'amount', key: 'amount', width: 16, type: 'n', dp: 0 }], rows: toLong(model) },
   ]);
 }
 
@@ -218,6 +241,6 @@ export function slimReport(r) {
   return {
     manpower: r.manpower || null,
     concerns: r.concerns || [],
-    rows: r.rows.map(({ pkg, pkgName, area, hint, summary, sub, desc, unit, bq, pct }) => ({ pkg, pkgName, area, hint, summary, sub, desc, unit, bq, pct })),
+    rows: r.rows.map(({ pkg, pkgName, area, hint, summary, sub, desc, unit, bq, pct, rate, amount }) => ({ pkg, pkgName, area, hint, summary, sub, desc, unit, bq, pct, ...(rate ? { rate } : {}), ...(amount ? { amount } : {}) })),
   };
 }
